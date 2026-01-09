@@ -8,3 +8,4 @@ service/.venv
 __pycache__/
 *.pyc
 context-info/*
+example-lib/*

@@ -6,6 +6,7 @@ from typing import Optional
 import shutil
 import tempfile
 import os
+import re
 
 app = FastAPI()
 
@@ -139,6 +140,48 @@ def resolve(doi: str):
     except Exception as e: 
         raise HTTPException(status_code=500, detail="Failed to resolve DOI via papis: " + str(e))
 
+
+@app.get("/api/lib")
+def get_current_library():
+    """Return the name of the current papis library."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        from papis.api import get_lib_name
+        name = get_lib_name()
+        return {"library": name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get current library: {e}")
+
+
+@app.get("/api/libs")
+def get_libraries():
+    """Return a list of all libraries known to papis."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        from papis.api import get_libraries
+        libs = get_libraries()
+        return {"libraries": libs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get libraries: {e}")
+
+
+@app.post("/api/lib")
+def set_library(body: dict):
+    """Set the current papis library. Body: {'library': '<name_or_path>'} """
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    lib = body.get("library") if isinstance(body, dict) else None
+    if not lib:
+        raise HTTPException(status_code=400, detail="Missing 'library' in request body")
+    try:
+        from papis.api import set_lib_from_name
+        set_lib_from_name(lib)
+        return {"ok": True, "library": lib}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to set library: {e}")
+
 def run_papis_add(file_path: str, metadata: dict) -> dict:
     try:
         from papis.commands.add import run as papis_add_run
@@ -161,6 +204,15 @@ def run_papis_add(file_path: str, metadata: dict) -> dict:
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
+FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+def safe_filename(value: str, fallback="paper") -> str:
+    if not value:
+        return fallback
+    value = value.strip()
+    value = value.replace("/", "_")
+    value = FILENAME_SAFE.sub("_", value)
+    return value[:255]  # filesystem-safe length
 
 @app.post("/api/papers")
 def add_paper(
@@ -170,6 +222,12 @@ def add_paper(
     """Accepts multipart form with 'metadata' (JSON string) and 'file' (PDF).
     Uses `papis` to add the paper to the library.
     """
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Only PDFs allowed")
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Invalid file extension")
+
     meta = {}
     if metadata:
         try:
@@ -181,9 +239,12 @@ def add_paper(
         raise HTTPException(status_code=400, detail="file is required")
 
     tmpdir = Path(tempfile.mkdtemp(prefix="papis_add_"))
-    file_path = tmpdir / ( (meta.get("doi") or "paper") + ".pdf")
+    doi = meta.get("doi")
+    name = safe_filename(doi) if doi else "paper"
+    file_path = tmpdir / f"{name}.pdf"
+
     with open(file_path, "wb") as f:
-        f.write(file)
+        shutil.copyfileobj(file.file, f)
 
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
