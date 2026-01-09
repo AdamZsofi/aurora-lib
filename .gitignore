@@ -1,0 +1,10 @@
+venv/
+.venv/
+node_modules/
+/.idea
+dist/
+web-ui/node_modules/
+service/.venv
+__pycache__/
+*.pyc
+context-info/*
