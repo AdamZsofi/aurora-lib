@@ -1,0 +1,131 @@
+type: collection.insomnia.rest/5.0
+schema_version: "5.1"
+name: ref-project
+meta:
+  id: wrk_153da9b92faf457a981eb0b9ebfb7a47
+  created: 1768129607533
+  modified: 1768129607533
+  description: ""
+collection:
+  - url: http://127.0.0.1:8000/api/resolve?doi=10.1145/3368089.3409743
+    name: doi-resolve
+    meta:
+      id: req_4924b44428cf41438d1a8d3b275ed98d
+      created: 1768129622443
+      modified: 1768129683780
+      isPrivate: false
+      description: ""
+      sortKey: -1768129622444
+    method: GET
+    headers:
+      - name: User-Agent
+        value: insomnia/12.1.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/api/lib
+    name: api-lib
+    meta:
+      id: req_acf5aae6f2544e0694ccd99984e65f16
+      created: 1768129645382
+      modified: 1768129669488
+      isPrivate: false
+      description: ""
+      sortKey: -1768129645383
+    method: GET
+    headers:
+      - name: User-Agent
+        value: insomnia/12.1.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/api/papers
+    name: api-papers
+    meta:
+      id: req_1e1f3bad2f634322975a2e0471ff7f88
+      created: 1768129651218
+      modified: 1768129664580
+      isPrivate: false
+      description: ""
+      sortKey: -1768129651218
+    method: GET
+    headers:
+      - name: User-Agent
+        value: insomnia/12.1.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/api/papers
+    name: add-paper
+    meta:
+      id: req_93e734f7fa67480b94257123c24d3d3e
+      created: 1768129698705
+      modified: 1768129794932
+      isPrivate: false
+      description: ""
+      sortKey: -1768129698705
+    method: POST
+    body:
+      mimeType: multipart/form-data
+      params:
+        - name: metadata
+          value: '{"doi":"10.1145/3510003.3510064","title":"Decomposing Software
+            Verification into Off-the-Shelf Components: An Application to
+            CEGAR"}'
+          description: ""
+          disabled: false
+        - name: file
+          value: ""
+          description: ""
+          disabled: false
+          fileName: ~/Repositories/ref-project/context-info/example-papers/2022-ICSE.Decomposing_Software_Verification_into_Off-the-Shelf-Components.pdf
+          type: file
+    headers:
+      - name: Content-Type
+        value: multipart/form-data
+      - name: User-Agent
+        value: insomnia/12.1.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+cookieJar:
+  name: Default Jar
+  meta:
+    id: jar_3182bf5f28b0a8e42d14937cc2559cf9b6d5546e
+    created: 1768129607538
+    modified: 1768129607538
+environments:
+  name: Base Environment
+  meta:
+    id: env_3182bf5f28b0a8e42d14937cc2559cf9b6d5546e
+    created: 1768129607536
+    modified: 1768129607536
+    isPrivate: false

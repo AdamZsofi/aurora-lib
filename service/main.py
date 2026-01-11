@@ -12,7 +12,6 @@ app = FastAPI()
 
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
 
-
 def papis_importable() -> bool:
     try:
         import papis  # noqa: F401
@@ -128,6 +127,8 @@ def paper_detail(paper_id: str):
 def resolve(doi: str):
     try:
         from papis.api import doi_to_data
+        if doi is None or doi == "":
+            raise RuntimeError("DOI is empty")
         data = doi_to_data(doi)
         # convert to simple preview shape
         title = data.get("title") or (data.get("message", {}).get("title") if isinstance(data, dict) else "")
@@ -206,9 +207,7 @@ def run_papis_add(file_path: str, metadata: dict) -> dict:
 
 FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]")
 
-def safe_filename(value: str, fallback="paper") -> str:
-    if not value:
-        return fallback
+def safe_filename(value: str) -> str:
     value = value.strip()
     value = value.replace("/", "_")
     value = FILENAME_SAFE.sub("_", value)
@@ -239,8 +238,11 @@ def add_paper(
         raise HTTPException(status_code=400, detail="file is required")
 
     tmpdir = Path(tempfile.mkdtemp(prefix="papis_add_"))
+    # FIXME what if no doi, add fallback (isbn? title?)
     doi = meta.get("doi")
-    name = safe_filename(doi) if doi else "paper"
+    if doi is None:
+        raise RuntimeError("DOI is none")
+    name = "paper-" + safe_filename(doi)
     file_path = tmpdir / f"{name}.pdf"
 
     with open(file_path, "wb") as f:
@@ -258,17 +260,40 @@ def add_paper(
 
 @app.get("/api/papers/{paper_id}/pdf")
 def get_pdf(paper_id: str, variant: str = "clean"):
-    # Try to find a matching PDF in context-info/example-papers
-    repo_root = Path(__file__).parent.parent
-    example_dir = repo_root / "context-info" / "example-papers"
-    if not example_dir.exists():
-        raise HTTPException(status_code=404, detail="example-papers directory not found")
-    candidates = list(example_dir.glob(f"*{paper_id}*.pdf"))
-    if not candidates:
-        raise HTTPException(status_code=404, detail="PDF not found")
-    path = candidates[0]
-    return Response(path.read_bytes(), media_type="application/pdf")
+    try:
+        from papis.database import get_database
 
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        files = doc.get_files()  # List[str] (absolute paths)
+
+        pdf_path = next(
+            (
+                Path(f)
+                for f in files
+                if Path(f).name.startswith("paper-") and Path(f).suffix == ".pdf"
+            ),
+            None,
+        )
+
+        if pdf_path is None or not pdf_path.exists():
+            raise HTTPException(status_code=404, detail="PDF not found")
+
+        return Response(
+            pdf_path.read_bytes(),
+            media_type="application/pdf",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to read papis database",
+        ) from e
 
 @app.delete("/api/papers/{paper_id}")
 def delete_paper(paper_id: str):
@@ -299,5 +324,4 @@ def delete_paper(paper_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run("main:app", host="127.0.0.1", port=8000, log_level="info")

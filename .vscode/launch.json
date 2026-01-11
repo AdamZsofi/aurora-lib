@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Uvicorn",
+      "name": "Backend: Debug (Uvicorn --reload)",
       "type": "python",
       "request": "launch",
       "module": "uvicorn",
@@ -10,11 +10,48 @@
         "main:app",
         "--reload",
         "--port", "8000",
-        "--app-dir", "service", 
-        "--log-level", "trace"
+        "--app-dir", "service"
       ],
       "jinja": true,
       "justMyCode": false
+    },
+    {
+      "name": "Backend: Run (Uvicorn)",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "main:app",
+        "--port", "8000",
+        "--app-dir", "service"
+      ],
+      "jinja": true,
+      "justMyCode": true
+    },
+    {
+      "name": "Frontend: npm dev",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/web-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: Debug",
+      "configurations": [
+        "Backend: Debug (Uvicorn --reload)",
+        "Frontend: npm dev"
+      ]
+    },
+    {
+      "name": "Full Stack: Run",
+      "configurations": [
+        "Backend: Run (Uvicorn)",
+        "Frontend: npm dev"
+      ]
     }
   ]
 }
