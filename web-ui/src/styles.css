@@ -1,14 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-.flex-pane .preview{ flex:1; min-width:280px; height:100% }
-.preview iframe{ width:100%; height:100%; border:0 }
+@import "tailwindcss";
 
-.libs-panel{ position: absolute; right: 0; top:40px; background: var(--surface); padding:8px; border-radius:6px; max-height:300px; overflow:auto; box-shadow: 0 6px 18px rgba(0,0,0,0.5) }
-.libs-panel button{ display:block; width:100%; text-align:left; margin-bottom:6px }
-
-.delete-btn{ background:transparent; color: #ff8b9b; border:1px solid rgba(255,140,150,0.12); padding:4px 8px; border-radius:6px }
-
-@media (max-width:900px){
-  .flex-pane{ flex-direction:column }
+/* Tailwind v4 CSS-first configuration */
+@theme {
+  /* Dark mode is still handled with the 'dark' class on <html> */
+  --color-aurora-50: #e6eef6;
+  --color-aurora-100: #cfe3ee;
+  --color-aurora-200: #b7d8e7;
+  --color-aurora-300: #9fb2c8;
+  --color-aurora-400: #2ce08e;
+  --color-aurora-500: #8f7ad9;
+  --color-aurora-600: #ff8fb1;
+  --color-aurora-700: #209363;
+  --color-aurora-800: #6b56b8;
+  --color-aurora-900: #d85f86;
 }

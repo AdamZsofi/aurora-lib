@@ -31,16 +31,3 @@ http://127.0.0.1:8000/api/health
 http://127.0.0.1:8000/api/papers
 http://127.0.0.1:8000/api/resolve?doi=10.1145/3368089.3409743
 ```
-
-### Frontend
-
-```
-# use the repo-local .nvmrc value and install if necessary
-cd ref-project
-nvm install
-nvm use
-
-# start frontend dev server
-cd web-ui
-npm run dev
-```
