@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Response
-from fastapi import Form, File, UploadFile
+from fastapi import Form, File, UploadFile, Body
 import json
 from pathlib import Path
 from typing import Optional
@@ -60,6 +60,7 @@ def _doc_to_json(doc) -> dict:
         "doi": doc.get("doi") or "",
         "year": doc.get("year") or doc.get("issued") or "",
         "files": doc.get("files") or [],
+        "tags": doc.get("tags") or [],
         "folder_name": None,
         "raw": dict(doc),
     }
@@ -183,11 +184,54 @@ def set_library(body: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set library: {e}")
 
-def run_papis_add(file_path: str, metadata: dict) -> dict:
+@app.get("/api/tags")
+def get_tags():
+    """Return list of unique tags across the library."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        from papis.database import get_database
+        db = get_database()
+        tags = set()
+        for doc in db.get_all_documents():
+            doc_tags = doc.get("tags") or []
+            if isinstance(doc_tags, list):
+                tags.update([t for t in doc_tags if isinstance(t, str) and t.strip()])
+        return {"tags": sorted(tags)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read tags: {e}")
+
+@app.post("/api/papers/{paper_id}/tags")
+def set_paper_tags(paper_id: str, body: dict = Body(...)):
+    """Set tags for a paper. Body: {'tags': ['tag1', 'tag2']}"""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    tags = body.get("tags") if isinstance(body, dict) else None
+    if not isinstance(tags, list):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'tags' list")
+    tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+    try:
+        from papis.database import get_database
+        from papis.api import save_doc
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        doc["tags"] = tags
+        save_doc(doc)
+        return {"ok": True, "paper": _doc_to_json(doc)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update tags: {e}")
+
+def run_papis_add(file_path: Optional[str], metadata: dict) -> dict:
     try:
         from papis.commands.add import run as papis_add_run
         # papis.commands.add.run signature: run(paths: list[str], data: dict|None = None, ...)
-        papis_add_run([str(file_path)], data=metadata, batch=True, confirm=False, edit=False)
+        paths = [str(file_path)] if file_path else []
+        papis_add_run(paths, data=metadata, batch=True, confirm=False, edit=False)
         # attempt to find the created document by DOI or title
         from papis.database import get_database
         db = get_database()
@@ -216,17 +260,11 @@ def safe_filename(value: str) -> str:
 @app.post("/api/papers")
 def add_paper(
     metadata: str = Form(...),
-    file: UploadFile = File(...)
+    file: Optional[UploadFile] = File(None)
 ):
     """Accepts multipart form with 'metadata' (JSON string) and 'file' (PDF).
     Uses `papis` to add the paper to the library.
     """
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Only PDFs allowed")
-
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Invalid file extension")
-
     meta = {}
     if metadata:
         try:
@@ -234,24 +272,27 @@ def add_paper(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid metadata JSON")
 
-    if file is None:
-        raise HTTPException(status_code=400, detail="file is required")
+    file_path = None
+    if file is not None:
+        if file.content_type != "application/pdf":
+            raise HTTPException(status_code=400, detail="Only PDFs allowed")
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="papis_add_"))
-    # FIXME what if no doi, add fallback (isbn? title?)
-    doi = meta.get("doi")
-    if doi is None:
-        raise RuntimeError("DOI is none")
-    name = "paper-" + safe_filename(doi)
-    file_path = tmpdir / f"{name}.pdf"
+        if not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Invalid file extension")
 
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        tmpdir = Path(tempfile.mkdtemp(prefix="papis_add_"))
+        doi = meta.get("doi")
+        title = meta.get("title") or "paper"
+        name = "paper-" + safe_filename(doi or title)
+        file_path = tmpdir / f"{name}.pdf"
+
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
 
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
 
-    res = run_papis_add(str(file_path), meta)
+    res = run_papis_add(str(file_path) if file_path else None, meta)
     if res.get("ok"):
         return {"source": "papis", "result": res}
 
@@ -274,7 +315,7 @@ def get_pdf(paper_id: str, variant: str = "clean"):
             (
                 Path(f)
                 for f in files
-                if Path(f).name.startswith("paper-") and Path(f).suffix == ".pdf"
+                if Path(f).suffix.lower() == ".pdf"
             ),
             None,
         )
@@ -294,6 +335,115 @@ def get_pdf(paper_id: str, variant: str = "clean"):
             status_code=500,
             detail="Failed to read papis database",
         ) from e
+
+@app.post("/api/papers/{paper_id}/pdf")
+def add_pdf_to_paper(paper_id: str, file: UploadFile = File(...)):
+    """Attach a PDF to an existing paper."""
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Only PDFs allowed")
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Invalid file extension")
+
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+
+    try:
+        from papis.database import get_database
+        from papis.commands.addto import run as addto_run
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        tmpdir = Path(tempfile.mkdtemp(prefix="papis_addto_"))
+        file_path = tmpdir / safe_filename(file.filename)
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        addto_run(doc, [str(file_path)], link=False, git=False)
+
+        # reload document
+        doc = db.find_by_id(paper_id)
+        return {"ok": True, "paper": _doc_to_json(doc)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add PDF: {e}")
+
+@app.post("/api/resolve-bib")
+def resolve_bib(file: UploadFile = File(...)):
+    """Parse BibTeX quickly and return basic fields (no metadata fetch)."""
+    try:
+        content = file.file.read().decode("utf-8", errors="ignore")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to read bib file")
+
+    # naive entry parsing
+    entries = re.findall(r"@\w+\s*\{[^@]*\}", content, flags=re.DOTALL)
+
+    def _field(entry: str, name: str) -> Optional[str]:
+        m = re.search(rf"{name}\s*=\s*(\{{[^\}}]*\}}|\"[^\"]*\"|[^,\n]+)", entry, flags=re.IGNORECASE)
+        if not m:
+            return None
+        val = m.group(1).strip()
+        if val.startswith("{") and val.endswith("}"):
+            val = val[1:-1]
+        if val.startswith("\"") and val.endswith("\""):
+            val = val[1:-1]
+        return val.strip()
+
+    items = []
+    for i, entry in enumerate(entries):
+        doi = _field(entry, "doi")
+        title = _field(entry, "title")
+        author = _field(entry, "author")
+        year = _field(entry, "year")
+        url = _field(entry, "url") or _field(entry, "link")
+
+        # fallback DOI regex if field missing
+        if not doi:
+            m = re.search(r"10\.\d{4,9}/[^\s\"\{\}<>]+", entry)
+            doi = m.group(0).rstrip(".") if m else None
+
+        items.append({
+            "id": f"entry-{i}",
+            "doi": doi,
+            "title": title,
+            "author": author,
+            "year": year,
+            "url": url,
+        })
+
+    return {"count": len(items), "items": items}
+
+@app.post("/api/resolve-dois")
+def resolve_dois(body: dict = Body(...)):
+    """Resolve a list of DOIs to metadata only when needed."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+
+    dois = body.get("dois") if isinstance(body, dict) else None
+    if not isinstance(dois, list):
+        raise HTTPException(status_code=400, detail="Expected 'dois' list")
+
+    items = []
+    try:
+        from papis.api import doi_to_data
+        for doi in dois:
+            if not doi:
+                items.append({"doi": doi, "ok": False, "error": "Missing DOI"})
+                continue
+            try:
+                data = doi_to_data(doi)
+                items.append({"doi": doi, "ok": True, "metadata": data})
+            except Exception as e:
+                items.append({"doi": doi, "ok": False, "error": str(e)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to resolve DOIs: {e}")
+
+    return {"count": len(items), "items": items}
 
 @app.delete("/api/papers/{paper_id}")
 def delete_paper(paper_id: str):

@@ -13,10 +13,13 @@ export default function App() {
   const [library, setLibrary] = useState<string | null>(null)
   const [showLibs, setShowLibs] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
+  const restoredRef = useRef(false)
   const [tabs, setTabs] = useState<Array<{ id: string, title: string }>>([
     { id: "__papers__", title: "📚" }
   ])
   const [activeTab, setActiveTab] = useState<string>("__papers__")
+  const [paperCache, setPaperCache] = useState<Record<string, any>>({})
+  const [paperLoading, setPaperLoading] = useState<Record<string, boolean>>({})
   const libsDropdownRef = useRef<HTMLDivElement>(null)
   const { theme, setTheme } = useTheme()
 
@@ -33,6 +36,41 @@ export default function App() {
 
     fetchPapers().then(setPapers)
   }, [])
+
+  // Restore tabs from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("aurora.tabs")
+      const rawActive = localStorage.getItem("aurora.activeTab")
+      if (raw) {
+        const savedTabs = JSON.parse(raw)
+        if (Array.isArray(savedTabs)) {
+          const cleaned = savedTabs.filter((t) => t && t.id && t.id !== "__papers__")
+          const nextTabs = [{ id: "__papers__", title: "📚" }, ...cleaned]
+          setTabs(nextTabs)
+          if (rawActive && nextTabs.some((t) => t.id === rawActive)) {
+            setActiveTab(rawActive)
+          }
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      restoredRef.current = true
+    }
+  }, [])
+
+  // Persist tabs and active tab
+  useEffect(() => {
+    if (!restoredRef.current) return
+    try {
+      const toSave = tabs.filter((t) => t.id !== "__papers__")
+      localStorage.setItem("aurora.tabs", JSON.stringify(toSave))
+      localStorage.setItem("aurora.activeTab", activeTab)
+    } catch {
+      // ignore
+    }
+  }, [tabs, activeTab])
 
   // global escape handler to close modals and dropdown
   useEffect(() => {
@@ -65,6 +103,29 @@ export default function App() {
       document.removeEventListener("mousedown", handleClickOutside)
     }
   }, [showLibs])
+
+  async function fetchPaper(id: string) {
+    setPaperLoading((prev) => ({ ...prev, [id]: true }))
+    try {
+      const r = await fetch(`/api/papers/${encodeURIComponent(id)}`)
+      const j = await r.json()
+      const paper = j.paper || j
+      setPaperCache((prev) => ({ ...prev, [id]: paper }))
+      if (paper?.title) {
+        setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, title: paper.title } : t)))
+      }
+    } catch {
+      setPaperCache((prev) => ({ ...prev, [id]: null }))
+    } finally {
+      setPaperLoading((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "__papers__" && paperCache[activeTab] === undefined) {
+      fetchPaper(activeTab)
+    }
+  }, [activeTab, paperCache])
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-sans">
@@ -131,46 +192,52 @@ export default function App() {
         </div>
 
         <main className="flex-1 px-6 py-4">
-          {activeTab === "__papers__" && (
-            <>
+          {/* Papers tab */}
+          <div className={activeTab === "__papers__" ? "block" : "hidden"}>
+            <div className="my-4 flex justify-between items-center">
+              <button
+                className="px-4 py-2 rounded bg-aurora-600 text-white font-semibold shadow hover:bg-aurora-700 transition-colors"
+                onClick={() => setShowAdd(true)}
+              >
+                Add paper
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <PapersTable
+                papers={papers}
+                onSelect={(id) => {
+                  // Open a new tab for this paper if not already open
+                  setTabs(tabs => {
+                    if (tabs.some(t => t.id === id)) return tabs
+                    // Find paper title
+                    const paper = papers.find(p => p.id === id || p.ref === id)
+                    return [
+                      ...tabs,
+                      { id, title: paper?.title || "Paper" }
+                    ]
+                  })
+                  setActiveTab(id)
+                }}
+              />
+            </div>
+          </div>
 
-              <div className="overflow-x-auto">
-                <PapersTable
-                  papers={papers}
-                  onSelect={(id) => {
-                    // Open a new tab for this paper if not already open
-                    setTabs(tabs => {
-                      if (tabs.some(t => t.id === id)) return tabs
-                      // Find paper title
-                      const paper = papers.find(p => p.id === id || p.ref === id)
-                      return [
-                        ...tabs,
-                        { id, title: paper?.title || "Paper" }
-                      ]
-                    })
-                    setActiveTab(id)
-                  }}
-                />
-              </div>
-              <div className="my-4">
-                <button
-                  className="px-4 py-2 rounded bg-aurora-600 text-white font-semibold shadow hover:bg-aurora-700 transition-colors"
-                  onClick={() => setShowAdd(true)}
-                >
-                  +
-                </button>
-              </div>
-            </>
-          )}
-          {activeTab !== "__papers__" && (
-            <PaperDetail
-              id={activeTab}
-              onClose={() => {
-                setTabs(tabs => tabs.filter(t => t.id !== activeTab))
-                setActiveTab("__papers__")
-              }}
-            />
-          )}
+          {/* Detail tabs - keep mounted to prevent PDF reload */}
+          {tabs.filter(t => t.id !== "__papers__").map((tab) => (
+            <div key={tab.id} className={activeTab === tab.id ? "block" : "hidden"}>
+              <PaperDetail
+                id={tab.id}
+                paper={paperCache[tab.id] ?? null}
+                loading={paperLoading[tab.id] ?? false}
+                onClose={() => {
+                  setTabs(tabs => tabs.filter(t => t.id !== tab.id))
+                  setActiveTab("__papers__")
+                }}
+                onRefresh={() => fetchPaper(tab.id)}
+              />
+            </div>
+          ))}
+
           {showAdd && (
             <AddPaper
               onClose={() => setShowAdd(false)}
