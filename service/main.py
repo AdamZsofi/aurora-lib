@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import os
 import re
+import urllib.parse
+import urllib.request
 
 app = FastAPI()
 
@@ -61,6 +63,7 @@ def _doc_to_json(doc) -> dict:
         "year": doc.get("year") or doc.get("issued") or "",
         "files": doc.get("files") or [],
         "tags": doc.get("tags") or [],
+        "user_notes": doc.get("user_notes") or [],
         "folder_name": None,
         "raw": dict(doc),
     }
@@ -131,6 +134,10 @@ def resolve(doi: str):
         if doi is None or doi == "":
             raise RuntimeError("DOI is empty")
         data = doi_to_data(doi)
+        tags = _openalex_keywords_for_doi(doi)
+        if tags and isinstance(data, dict):
+            existing = data.get("tags") if isinstance(data.get("tags"), list) else []
+            data["tags"] = list(dict.fromkeys([*existing, *tags]))
         # convert to simple preview shape
         title = data.get("title") or (data.get("message", {}).get("title") if isinstance(data, dict) else "")
         authors = []
@@ -209,7 +216,7 @@ def set_paper_tags(paper_id: str, body: dict = Body(...)):
     tags = body.get("tags") if isinstance(body, dict) else None
     if not isinstance(tags, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'tags' list")
-    tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+    tags = [_normalize_tag(t) for t in tags if isinstance(t, str) and t.strip()]
     try:
         from papis.database import get_database
         from papis.api import save_doc
@@ -225,6 +232,37 @@ def set_paper_tags(paper_id: str, body: dict = Body(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update tags: {e}")
+
+@app.post("/api/papers/{paper_id}/notes")
+def add_paper_note(paper_id: str, body: dict = Body(...)):
+    """Append a user note to a paper. Body: {'author': 'name', 'text': 'note'}"""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    author = body.get("author") if isinstance(body, dict) else None
+    text = body.get("text") if isinstance(body, dict) else None
+    if not isinstance(author, str) or not author.strip():
+        raise HTTPException(status_code=400, detail="Missing 'author'")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(status_code=400, detail="Missing 'text'")
+    try:
+        from papis.database import get_database
+        from papis.api import save_doc
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        notes = doc.get("user_notes") or []
+        if not isinstance(notes, list):
+            notes = []
+        notes.append({"author": author.strip(), "text": text.strip()})
+        doc["user_notes"] = notes
+        save_doc(doc)
+        return {"ok": True, "paper": _doc_to_json(doc)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add note: {e}")
 
 def run_papis_add(file_path: Optional[str], metadata: dict) -> dict:
     try:
@@ -257,6 +295,36 @@ def safe_filename(value: str) -> str:
     value = FILENAME_SAFE.sub("_", value)
     return value[:255]  # filesystem-safe length
 
+def _normalize_tag(tag: str) -> str:
+    tag = tag.strip().lower()
+    tag = re.sub(r"\s*\([^)]*\)", "", tag)
+    tag = re.sub(r"\s+", " ", tag).strip()
+    return tag
+
+def _openalex_keywords_for_doi(doi: str) -> list[str]:
+    """Fetch keywords from OpenAlex for a DOI, return as tag list."""
+    if not doi:
+        return []
+    try:
+        doi_url = "https://doi.org/" + doi.strip()
+        encoded = urllib.parse.quote(doi_url, safe="")
+        url = f"https://api.openalex.org/works/{encoded}"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        tags: list[str] = []
+        for kw in data.get("keywords", []) or []:
+            name = kw.get("display_name") if isinstance(kw, dict) else None
+            if name:
+                tags.append(_normalize_tag(name))
+        if not tags:
+            for c in data.get("concepts", []) or []:
+                name = c.get("display_name") if isinstance(c, dict) else None
+                if name:
+                    tags.append(_normalize_tag(name))
+        return list(dict.fromkeys(tags))
+    except Exception:
+        return []
+
 @app.post("/api/papers")
 def add_paper(
     metadata: str = Form(...),
@@ -271,6 +339,9 @@ def add_paper(
             meta = json.loads(metadata)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid metadata JSON")
+
+    if isinstance(meta.get("tags"), list):
+        meta["tags"] = [t for t in (_normalize_tag(x) for x in meta.get("tags")) if t]
 
     file_path = None
     if file is not None:
@@ -437,6 +508,10 @@ def resolve_dois(body: dict = Body(...)):
                 continue
             try:
                 data = doi_to_data(doi)
+                tags = _openalex_keywords_for_doi(doi)
+                if tags and isinstance(data, dict):
+                    existing = data.get("tags") if isinstance(data.get("tags"), list) else []
+                    data["tags"] = list(dict.fromkeys([*existing, *tags]))
                 items.append({"doi": doi, "ok": True, "metadata": data})
             except Exception as e:
                 items.append({"doi": doi, "ok": False, "error": str(e)})

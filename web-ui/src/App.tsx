@@ -63,7 +63,7 @@ export default function App() {
   // Persist tabs and active tab
   useEffect(() => {
     if (!restoredRef.current) return
-    try {
+    try {      
       const toSave = tabs.filter((t) => t.id !== "__papers__")
       localStorage.setItem("aurora.tabs", JSON.stringify(toSave))
       localStorage.setItem("aurora.activeTab", activeTab)
@@ -234,6 +234,13 @@ export default function App() {
                   setActiveTab("__papers__")
                 }}
                 onRefresh={() => fetchPaper(tab.id)}
+                onUpdatePaper={(paper) => {
+                  if (!paper) return
+                  setPaperCache((prev) => ({ ...prev, [tab.id]: paper }))
+                  if (paper?.title) {
+                    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, title: paper.title } : t)))
+                  }
+                }}
               />
             </div>
           ))}

@@ -7,12 +7,14 @@ export function PaperDetail({
   loading,
   onClose,
   onRefresh,
+  onUpdatePaper,
 }: {
   id: string
   paper: any | null
   loading: boolean
   onClose: () => void
   onRefresh: () => void
+  onUpdatePaper?: (paper: any) => void
 }) {
   const [showMeta, setShowMeta] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
@@ -23,6 +25,11 @@ export function PaperDetail({
   const [tags, setTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
   const [tagError, setTagError] = useState<string | null>(null)
+  const [notes, setNotes] = useState<Array<{ author: string; text: string }>>([])
+  const [noteAuthor, setNoteAuthor] = useState("")
+  const [noteText, setNoteText] = useState("")
+  const [savingNote, setSavingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string | null>(null)
 
   const pdfExists = Array.isArray(paper?.files)
     ? paper.files.some((f: string) => f.toLowerCase().endsWith(".pdf"))
@@ -30,6 +37,7 @@ export function PaperDetail({
 
   useEffect(() => {
     setTags(Array.isArray(paper?.tags) ? paper.tags : [])
+    setNotes(Array.isArray(paper?.user_notes) ? paper.user_notes : [])
   }, [paper])
 
   useEffect(() => {
@@ -40,17 +48,12 @@ export function PaperDetail({
   }, [])
 
   function tagColor(tag: string) {
-    const colors = [
-      "bg-aurora-100 text-aurora-900",
-      "bg-emerald-100 text-emerald-900",
-      "bg-sky-100 text-sky-900",
-      "bg-amber-100 text-amber-900",
-      "bg-fuchsia-100 text-fuchsia-900",
-      "bg-lime-100 text-lime-900",
-    ]
     let hash = 0
     for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0
-    return colors[hash % colors.length]
+    const hue = hash % 360
+    const bg = `hsl(${hue} 70% 60%)`
+    const text = "#0f172a"
+    return { backgroundColor: bg, color: text }
   }
 
   async function saveTags(nextTags: string[]) {
@@ -66,11 +69,44 @@ export function PaperDetail({
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || "Failed to save tags")
       }
-      onRefresh()
+      const j = await r.json()
+      if (j?.paper) {
+        onUpdatePaper?.(j.paper)
+        setTags(Array.isArray(j.paper.tags) ? j.paper.tags : nextTags)
+      }
     } catch (e: any) {
       setTagError(e.message || "Failed to save tags")
     } finally {
       setSavingTags(false)
+    }
+  }
+
+  async function addNote() {
+    const author = noteAuthor.trim()
+    const text = noteText.trim()
+    if (!author || !text) return
+    setSavingNote(true)
+    setNoteError(null)
+    try {
+      const r = await fetch(`/api/papers/${encodeURIComponent(id)}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ author, text }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to add note")
+      }
+      const j = await r.json()
+      if (j?.paper) {
+        onUpdatePaper?.(j.paper)
+        setNotes(Array.isArray(j.paper.user_notes) ? j.paper.user_notes : [])
+      }
+      setNoteText("")
+    } catch (e: any) {
+      setNoteError(e.message || "Failed to add note")
+    } finally {
+      setSavingNote(false)
     }
   }
 
@@ -89,8 +125,13 @@ export function PaperDetail({
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || "Failed to upload PDF")
       }
+      const j = await r.json().catch(() => ({}))
       setPdfFile(null)
-      onRefresh()
+      if (j?.paper) {
+        onUpdatePaper?.(j.paper)
+      } else {
+        onRefresh()
+      }
     } catch (e: any) {
       setUploadError(e.message || "Failed to upload PDF")
     } finally {
@@ -141,6 +182,19 @@ export function PaperDetail({
             <div className="mb-1">
               <strong>Year:</strong> {paper.year || "(unknown)"}
             </div>
+            {paper.raw?.URL || paper.raw?.url || paper.raw?.link ? (
+              <div className="mb-1">
+                <strong>URL:</strong>{" "}
+                <a
+                  className="text-aurora-700 hover:underline break-all"
+                  href={paper.raw?.URL || paper.raw?.url || paper.raw?.link}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {paper.raw?.URL || paper.raw?.url || paper.raw?.link}
+                </a>
+              </div>
+            ) : null}
 
             <div className="mt-2">
               <div className="text-sm font-semibold mb-1">Tags</div>
@@ -149,7 +203,7 @@ export function PaperDetail({
                   <span className="text-xs text-zinc-500">No tags yet</span>
                 )}
                 {tags.map((t) => (
-                  <span key={t} className={`px-2 py-0.5 rounded text-xs ${tagColor(t)}`}>
+                  <span key={t} className="px-2 py-0.5 rounded text-xs" style={tagColor(t)}>
                     {t}
                     <button
                       className="ml-1 text-xs"
@@ -174,7 +228,7 @@ export function PaperDetail({
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault()
-                      const clean = tagInput.trim()
+                      const clean = tagInput.trim().toLowerCase()
                       if (clean && !tags.includes(clean)) {
                         const next = [...tags, clean]
                         setTags(next)
@@ -187,7 +241,7 @@ export function PaperDetail({
                 <button
                   className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors disabled:opacity-50"
                   onClick={() => {
-                    const clean = tagInput.trim()
+                    const clean = tagInput.trim().toLowerCase()
                     if (clean && !tags.includes(clean)) {
                       const next = [...tags, clean]
                       setTags(next)
@@ -206,6 +260,46 @@ export function PaperDetail({
                 </datalist>
               </div>
               {tagError && <div className="text-xs text-rose-500 mt-1">{tagError}</div>}
+            </div>
+
+            <div className="mt-4">
+              <div className="text-sm font-semibold mb-1">Notes</div>
+              {notes.length === 0 && (
+                <div className="text-xs text-zinc-500">No notes yet</div>
+              )}
+              {notes.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {notes.map((n, idx) => (
+                    <div key={idx} className="rounded border border-zinc-200 dark:border-zinc-700 p-2">
+                      <div className="text-xs text-zinc-500">{n.author}</div>
+                      <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 flex flex-col gap-2">
+                <input
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full max-w-xs bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  placeholder="Your name"
+                  value={noteAuthor}
+                  onChange={(e) => setNoteAuthor(e.target.value)}
+                />
+                <textarea
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  placeholder="Write a note..."
+                  rows={3}
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                />
+                <button
+                  className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors disabled:opacity-50 w-fit"
+                  onClick={addNote}
+                  disabled={savingNote || !noteAuthor.trim() || !noteText.trim()}
+                >
+                  {savingNote ? "Saving..." : "Add note"}
+                </button>
+                {noteError && <div className="text-xs text-rose-500">{noteError}</div>}
+              </div>
             </div>
 
             <div className="mt-3">

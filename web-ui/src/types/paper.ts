@@ -8,4 +8,5 @@ export type Paper = {
   files?: string[]
   raw?: any
   tags?: string[]
+  user_notes?: Array<{ author: string; text: string }>
 }

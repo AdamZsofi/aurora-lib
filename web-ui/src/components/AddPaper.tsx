@@ -13,6 +13,7 @@ type BatchItem = {
   error?: string
   selected: boolean
   file?: File | null
+  tags?: string[]
   metaOpen?: boolean
   status?: "idle" | "adding" | "done" | "error"
 }
@@ -65,21 +66,16 @@ export function AddPaper({
   }
 
   function tagColor(tag: string) {
-    const colors = [
-      "bg-aurora-100 text-aurora-900",
-      "bg-emerald-100 text-emerald-900",
-      "bg-sky-100 text-sky-900",
-      "bg-amber-100 text-amber-900",
-      "bg-fuchsia-100 text-fuchsia-900",
-      "bg-lime-100 text-lime-900",
-    ]
     let hash = 0
     for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0
-    return colors[hash % colors.length]
+    const hue = hash % 360
+    const bg = `hsl(${hue} 70% 60%)`
+    const text = "#0f172a"
+    return { backgroundColor: bg, color: text }
   }
 
   function addTag(tag: string, setTags: (tags: string[]) => void, current: string[]) {
-    const clean = tag.trim()
+    const clean = tag.trim().toLowerCase()
     if (!clean) return
     if (!current.includes(clean)) setTags([...current, clean])
   }
@@ -193,6 +189,7 @@ export function AddPaper({
             author: summary?.authors || it.author,
             year: summary?.year || it.year,
             url: summary?.url || it.url,
+            tags: Array.isArray(resolved.metadata?.tags) ? resolved.metadata.tags : it.tags,
             error: resolved.error,
           }
         })
@@ -220,9 +217,10 @@ export function AddPaper({
       )
       try {
         const form = new FormData()
-        const metaWithTags = batchTags.length
-          ? { ...item.metadata, tags: Array.from(new Set([...(item.metadata?.tags || []), ...batchTags])) }
-          : item.metadata
+        const metaWithTags = {
+          ...item.metadata,
+          tags: Array.from(new Set([...(item.metadata?.tags || []), ...(item.tags || []), ...batchTags])),
+        }
         form.append("metadata", JSON.stringify(metaWithTags))
         if (item.file) form.append("file", item.file)
         const r = await fetch("/api/papers", { method: "POST", body: form })
@@ -393,7 +391,7 @@ export function AddPaper({
               {selectedTags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {selectedTags.map((t) => (
-                    <span key={t} className={`px-2 py-0.5 rounded text-xs ${tagColor(t)}`}>
+                    <span key={t} className="px-2 py-0.5 rounded text-xs" style={tagColor(t)}>
                       {t}
                       <button
                         className="ml-1 text-xs"
@@ -569,23 +567,23 @@ export function AddPaper({
                     <div className="font-semibold">
                       {item.title || item.doi || "(no title)"}
                     </div>
-                    <div className="text-xs text-zinc-500">DOI: {item.doi || "(missing)"}</div>
+                    <div className="text-sm text-zinc-500">DOI: {item.doi || "(missing)"}</div>
                     {item.author && (
-                      <div className="text-xs text-zinc-500">Authors: {item.author}</div>
+                      <div className="text-sm text-zinc-500">Authors: {item.author}</div>
                     )}
                     {item.year && (
-                      <div className="text-xs text-zinc-500">Year: {item.year}</div>
+                      <div className="text-sm text-zinc-500">Year: {item.year}</div>
                     )}
                     {item.url && (
-                      <div className="text-xs text-aurora-700 truncate">
+                      <div className="text-sm text-aurora-700 truncate">
                         <a href={item.url} target="_blank" rel="noreferrer">
                           {item.url}
                         </a>
                       </div>
                     )}
-                    {item.error && <div className="text-xs text-rose-500">{item.error}</div>}
+                    {item.error && <div className="text-sm text-rose-500">{item.error}</div>}
                   </div>
-                  <div className="text-xs text-zinc-400">
+                  <div className="text-sm text-zinc-400">
                     {item.resolved ? "Resolved" : "Unresolved"}
                     {item.status === "adding" && " · Adding..."}
                     {item.status === "done" && " · Added"}
@@ -594,7 +592,7 @@ export function AddPaper({
                 </div>
 
                 {item.ok && (
-                  <div className="mt-2 flex items-center gap-3">
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
                     <label className="px-2 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer text-xs">
                       <input
                         type="file"
@@ -608,6 +606,46 @@ export function AddPaper({
                     </label>
                     {item.file && (
                       <span className="text-xs text-zinc-500 truncate max-w-[240px]">{item.file.name}</span>
+                    )}
+                    <input
+                      className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                      placeholder="Add tag"
+                      list="tag-suggestions"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          const value = (e.currentTarget as HTMLInputElement).value
+                          const clean = value.trim().toLowerCase()
+                          if (!clean) return
+                          setBatchItems((prev) => prev.map((i) =>
+                            i.id === item.id
+                              ? { ...i, tags: Array.from(new Set([...(i.tags || []), clean])) }
+                              : i
+                          ))
+                          e.currentTarget.value = ""
+                        }
+                      }}
+                    />
+                    {Array.isArray(item.tags) && item.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {item.tags.map((t) => (
+                          <span key={t} className="px-2 py-0.5 rounded text-xs" style={tagColor(t)}>
+                            {t}
+                            <button
+                              className="ml-1 text-xs"
+                              onClick={() =>
+                                setBatchItems((prev) => prev.map((i) =>
+                                  i.id === item.id
+                                    ? { ...i, tags: (i.tags || []).filter((x) => x !== t) }
+                                    : i
+                                ))
+                              }
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
                     )}
                     {item.resolved && (
                       <button
