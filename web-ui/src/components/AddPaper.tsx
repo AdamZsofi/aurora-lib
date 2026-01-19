@@ -21,9 +21,11 @@ type BatchItem = {
 export function AddPaper({
   onClose,
   onAdded,
+  library,
 }: {
   onClose: () => void
   onAdded: () => void
+  library?: string | null
 }) {
   const [mode, setMode] = useState<"single" | "batch">("single")
 
@@ -91,6 +93,14 @@ export function AddPaper({
       }
       const j = await r.json()
       setMetadata(j)
+      const metaTags = Array.isArray(j?.tags) ? j.tags : []
+      if (metaTags.length) {
+        const normalized = metaTags
+          .filter((t: any) => typeof t === "string")
+          .map((t: string) => t.trim().toLowerCase())
+          .filter(Boolean)
+        setSelectedTags((prev) => Array.from(new Set([...prev, ...normalized])))
+      }
       setMetaOpen(true)
       setStatus("fetched")
     } catch {
@@ -109,7 +119,8 @@ export function AddPaper({
     if (file) form.append("file", file)
 
     try {
-      const r = await fetch(`/api/papers`, { method: "POST", body: form })
+      const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
+      const r = await fetch(url, { method: "POST", body: form })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || "Failed to add paper")
@@ -223,7 +234,8 @@ export function AddPaper({
         }
         form.append("metadata", JSON.stringify(metaWithTags))
         if (item.file) form.append("file", item.file)
-        const r = await fetch("/api/papers", { method: "POST", body: form })
+        const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
+        const r = await fetch(url, { method: "POST", body: form })
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
           throw new Error(j.detail || "Failed to add paper")
@@ -244,11 +256,12 @@ export function AddPaper({
   }
 
   useEffect(() => {
-    fetch("/api/tags")
+    const url = library ? `/api/tags?library=${encodeURIComponent(library)}` : "/api/tags"
+    fetch(url)
       .then((r) => r.json())
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
-  }, [])
+  }, [library])
 
   useEffect(() => {
     if (!file) {
@@ -341,22 +354,6 @@ export function AddPaper({
               </div>
             )}
 
-            {metadata && (
-              <div className="mb-2">
-                <button
-                  className="text-sm text-aurora-700 hover:underline"
-                  onClick={() => setMetaOpen((s) => !s)}
-                >
-                  {metaOpen ? "Hide metadata" : "Show metadata"}
-                </button>
-                {metaOpen && (
-                  <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 max-h-[300px] overflow-auto rounded text-xs mt-2">
-                    {JSON.stringify(metadata, null, 2)}
-                  </pre>
-                )}
-              </div>
-            )}
-
             <div className="mb-2">
               <div className="flex items-center gap-2">
                 <input
@@ -405,6 +402,22 @@ export function AddPaper({
               )}
             </div>
 
+            {metadata && (
+              <div className="mb-2">
+                <button
+                  className="text-sm text-aurora-700 hover:underline"
+                  onClick={() => setMetaOpen((s) => !s)}
+                >
+                  {metaOpen ? "Hide metadata" : "Show metadata"}
+                </button>
+                {metaOpen && (
+                  <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 max-h-75 overflow-auto rounded text-xs mt-2">
+                    {JSON.stringify(metadata, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-3 mt-2">
               <button
                 className="px-4 py-2 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
@@ -434,7 +447,7 @@ export function AddPaper({
                   {file ? "Change PDF" : "Choose PDF"}
                 </label>
                 {file && (
-                  <span className="text-xs text-zinc-500 truncate max-w-[240px]">{file.name}</span>
+                  <span className="text-xs text-zinc-500 truncate max-w-60">{file.name}</span>
                 )}
               </div>
               <div className="text-xs text-zinc-500 mt-1">You can add a PDF now or later.</div>
@@ -442,7 +455,7 @@ export function AddPaper({
             {filePreviewUrl && (
               <iframe
                 src={filePreviewUrl}
-                className="w-full h-[520px] border border-zinc-200 dark:border-zinc-700 rounded"
+                className="w-full h-130 border border-zinc-200 dark:border-zinc-700 rounded"
               />
             )}
           </div>
@@ -462,7 +475,7 @@ export function AddPaper({
               {bibFile ? "Change .bib" : "Choose .bib"}
             </label>
             {bibFile && (
-              <span className="text-xs text-zinc-500 truncate max-w-[240px]">{bibFile.name}</span>
+              <span className="text-xs text-zinc-500 truncate max-w-60">{bibFile.name}</span>
             )}
             <button
               className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors disabled:opacity-50"
@@ -605,7 +618,7 @@ export function AddPaper({
                       {item.file ? "Change PDF" : "Optional PDF"}
                     </label>
                     {item.file && (
-                      <span className="text-xs text-zinc-500 truncate max-w-[240px]">{item.file.name}</span>
+                      <span className="text-xs text-zinc-500 truncate max-w-60">{item.file.name}</span>
                     )}
                     <input
                       className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
@@ -661,7 +674,7 @@ export function AddPaper({
                 )}
 
                 {item.metaOpen && item.metadata && (
-                  <pre className="bg-zinc-100 dark:bg-zinc-900 p-2 max-h-[200px] overflow-auto rounded text-xs mt-2">
+                  <pre className="bg-zinc-100 dark:bg-zinc-900 p-2 max-h-50 overflow-auto rounded text-xs mt-2">
                     {JSON.stringify(item.metadata, null, 2)}
                   </pre>
                 )}

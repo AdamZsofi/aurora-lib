@@ -15,6 +15,17 @@ app = FastAPI()
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
 UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
 
+def _set_library_from_param(library: Optional[str]) -> None:
+    if not library:
+        return
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        from papis.api import set_lib_from_name
+        set_lib_from_name(library)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to select library: {e}")
+
 def papis_importable() -> bool:
     try:
         import papis  # noqa: F401
@@ -79,10 +90,11 @@ def _doc_to_json(doc) -> dict:
     return out
 
 
-def get_papis_list():
+def get_papis_list(library: Optional[str] = None):
     # Prefer importing papis as a library; fall back to subprocess if needed
     if papis_importable():
         try:
+            _set_library_from_param(library)
             from papis.database import get_database
             db = get_database()
             docs = db.get_all_documents()
@@ -105,8 +117,8 @@ def health():
 
 
 @app.get("/api/papers")
-def papers():
-    data = get_papis_list()
+def papers(library: Optional[str] = None):
+    data = get_papis_list(library)
     if data is not None:
         return {"source": "papis", "papers": data}
     if SAMPLE_FILE.exists():
@@ -145,8 +157,9 @@ def set_ui_state(body: dict = Body(...)):
 
 
 @app.get("/api/papers/{paper_id}")
-def paper_detail(paper_id: str):
+def paper_detail(paper_id: str, library: Optional[str] = None):
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         db = get_database()
         doc = db.find_by_id(paper_id)
@@ -223,11 +236,12 @@ def set_library(body: dict):
         raise HTTPException(status_code=500, detail=f"Failed to set library: {e}")
 
 @app.get("/api/tags")
-def get_tags():
+def get_tags(library: Optional[str] = None):
     """Return list of unique tags across the library."""
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         db = get_database()
         tags = set()
@@ -240,7 +254,7 @@ def get_tags():
         raise HTTPException(status_code=500, detail=f"Failed to read tags: {e}")
 
 @app.post("/api/papers/{paper_id}/tags")
-def set_paper_tags(paper_id: str, body: dict = Body(...)):
+def set_paper_tags(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
     """Set tags for a paper. Body: {'tags': ['tag1', 'tag2']}"""
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
@@ -249,6 +263,7 @@ def set_paper_tags(paper_id: str, body: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Missing or invalid 'tags' list")
     tags = [_normalize_tag(t) for t in tags if isinstance(t, str) and t.strip()]
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         from papis.api import save_doc
 
@@ -265,7 +280,7 @@ def set_paper_tags(paper_id: str, body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to update tags: {e}")
 
 @app.post("/api/papers/{paper_id}/notes")
-def add_paper_note(paper_id: str, body: dict = Body(...)):
+def add_paper_note(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
     """Append a user note to a paper. Body: {'author': 'name', 'text': 'note'}"""
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
@@ -276,6 +291,7 @@ def add_paper_note(paper_id: str, body: dict = Body(...)):
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(status_code=400, detail="Missing 'text'")
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         from papis.api import save_doc
 
@@ -305,11 +321,12 @@ def add_paper_note(paper_id: str, body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to add note: {e}")
 
 @app.get("/api/note-authors")
-def get_note_authors():
+def get_note_authors(library: Optional[str] = None):
     """Return list of unique note authors across the library."""
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         db = get_database()
         authors = set()
@@ -389,7 +406,8 @@ def _openalex_keywords_for_doi(doi: str) -> list[str]:
 @app.post("/api/papers")
 def add_paper(
     metadata: str = Form(...),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    library: Optional[str] = None
 ):
     """Accepts multipart form with 'metadata' (JSON string) and 'file' (PDF).
     Uses `papis` to add the paper to the library.
@@ -424,6 +442,7 @@ def add_paper(
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
 
+    _set_library_from_param(library)
     res = run_papis_add(str(file_path) if file_path else None, meta)
     if res.get("ok"):
         return {"source": "papis", "result": res}
@@ -432,8 +451,9 @@ def add_paper(
 
 
 @app.get("/api/papers/{paper_id}/pdf")
-def get_pdf(paper_id: str, variant: str = "clean"):
+def get_pdf(paper_id: str, variant: str = "clean", library: Optional[str] = None):
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
 
         db = get_database()
@@ -469,7 +489,7 @@ def get_pdf(paper_id: str, variant: str = "clean"):
         ) from e
 
 @app.post("/api/papers/{paper_id}/pdf")
-def add_pdf_to_paper(paper_id: str, file: UploadFile = File(...)):
+def add_pdf_to_paper(paper_id: str, file: UploadFile = File(...), library: Optional[str] = None):
     """Attach a PDF to an existing paper."""
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDFs allowed")
@@ -481,6 +501,7 @@ def add_pdf_to_paper(paper_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
 
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         from papis.commands.addto import run as addto_run
 
@@ -582,12 +603,13 @@ def resolve_dois(body: dict = Body(...)):
     return {"count": len(items), "items": items}
 
 @app.delete("/api/papers/{paper_id}")
-def delete_paper(paper_id: str):
+def delete_paper(paper_id: str, library: Optional[str] = None):
     """Delete a paper from the papis library by papis id."""
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
 
     try:
+        _set_library_from_param(library)
         from papis.database import get_database
         from papis.document import delete as delete_document, describe
 

@@ -8,6 +8,7 @@ type PaperDetailProps = {
   onClose: () => void
   onRefresh: () => void
   onUpdatePaper?: (paper: any) => void
+  library?: string | null
   username?: string
   onNoteAuthorsRefresh?: () => void
 }
@@ -19,6 +20,7 @@ export function PaperDetail({
   onClose,
   onRefresh,
   onUpdatePaper,
+  library,
   username,
   onNoteAuthorsRefresh,
 }: PaperDetailProps) {
@@ -60,11 +62,12 @@ export function PaperDetail({
   }, [paper, username])
 
   useEffect(() => {
-    fetch("/api/tags")
+    const url = library ? `/api/tags?library=${encodeURIComponent(library)}` : "/api/tags"
+    fetch(url)
       .then((r) => r.json())
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
-  }, [])
+  }, [library])
 
   function tagColor(tag: string) {
     let hash = 0
@@ -79,7 +82,10 @@ export function PaperDetail({
     setSavingTags(true)
     setTagError(null)
     try {
-      const r = await fetch(`/api/papers/${encodeURIComponent(id)}/tags`, {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/tags?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/tags`
+      const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tags: nextTags }),
@@ -108,7 +114,10 @@ export function PaperDetail({
     setSavingNote(true)
     setNoteError(null)
     try {
-      const r = await fetch(`/api/papers/${encodeURIComponent(id)}/notes`, {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/notes?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/notes`
+      const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ author, text }),
@@ -155,7 +164,10 @@ export function PaperDetail({
     try {
       const form = new FormData()
       form.append("file", pdfFile)
-      const r = await fetch(`/api/papers/${encodeURIComponent(id)}/pdf`, {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/pdf?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/pdf`
+      const r = await fetch(url, {
         method: "POST",
         body: form,
       })
@@ -186,7 +198,7 @@ export function PaperDetail({
             className="px-3 py-1 rounded bg-aurora-900 text-white hover:bg-aurora-600 transition-colors"
             onClick={() => {
               if (confirm("Delete paper?")) {
-                deletePaper(id)
+                deletePaper(id, library)
                 onClose()
               }
             }}
@@ -216,6 +228,18 @@ export function PaperDetail({
             </div>
             <div className="mb-1">
               <strong>DOI:</strong> {paper.doi || "(none)"}
+              {paper.doi && (
+                <button
+                  className="ml-2 text-xs px-2 py-0.5 rounded border border-aurora-400 text-aurora-700 hover:bg-aurora-50 dark:hover:bg-zinc-800 transition-colors"
+                  onClick={() => {
+                    const doi = encodeURIComponent(paper.doi)
+                    window.open(`https://inciteful.xyz/p/${doi}`, "_blank", "noopener,noreferrer")
+                  }}
+                  title="Open in Inciteful"
+                >
+                  Inciteful
+                </button>
+              )}
             </div>
             <div className="mb-1">
               <strong>Year:</strong> {paper.year || "(unknown)"}
@@ -365,7 +389,9 @@ export function PaperDetail({
             {pdfExists ? (
               <div className="h-150 border border-zinc-200 dark:border-zinc-700 mt-1 rounded">
                 <iframe
-                  src={`/api/papers/${encodeURIComponent(id)}/pdf`}
+                  src={library
+                    ? `/api/papers/${encodeURIComponent(id)}/pdf?library=${encodeURIComponent(library)}`
+                    : `/api/papers/${encodeURIComponent(id)}/pdf`}
                   className="w-full h-full"
                 />
               </div>

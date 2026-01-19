@@ -11,7 +11,13 @@ export default function App() {
   const defaultTabs = [{ id: "__papers__", title: "📚" }]
   const [health, setHealth] = useState<string | null>(null)
   const [papers, setPapers] = useState<Paper[]>([])
-  const [library, setLibrary] = useState<string | null>(null)
+  const [library, setLibrary] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("aurora.library")
+    } catch {
+      return null
+    }
+  })
   const [showLibs, setShowLibs] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const restoredRef = useRef(false)
@@ -55,18 +61,34 @@ export default function App() {
       .then((j) => setHealth(j.status))
       .catch(() => setHealth("unavailable"))
 
-    fetch("/api/lib")
-      .then((r) => r.json())
-      .then((j) => setLibrary(j.library))
-      .catch(() => setLibrary(null))
+    if (!library) {
+      fetch("/api/lib")
+        .then((r) => r.json())
+        .then((j) => setLibrary(j.library))
+        .catch(() => setLibrary(null))
+    }
+  }, [])
 
-    fetchPapers().then(setPapers)
+  useEffect(() => {
+    try {
+      if (library) localStorage.setItem("aurora.library", library)
+      else localStorage.removeItem("aurora.library")
+    } catch {
+      // ignore
+    }
+  }, [library])
 
-    fetch("/api/note-authors")
+  useEffect(() => {
+    fetchPapers(library).then(setPapers)
+    setPaperCache({})
+    setPaperLoading({})
+    setTabs(defaultTabs)
+    setActiveTab("__papers__")
+    fetch(`/api/note-authors${library ? `?library=${encodeURIComponent(library)}` : ""}`)
       .then((r) => r.json())
       .then((j) => setNoteAuthors(j.authors || []))
       .catch(() => setNoteAuthors([]))
-  }, [])
+  }, [library])
 
   useEffect(() => {
     restoredRef.current = true
@@ -187,7 +209,10 @@ export default function App() {
   async function fetchPaper(id: string) {
     setPaperLoading((prev) => ({ ...prev, [id]: true }))
     try {
-      const r = await fetch(`/api/papers/${encodeURIComponent(id)}`)
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}`
+      const r = await fetch(url)
       const j = await r.json()
       const paper = j.paper || j
       setPaperCache((prev) => ({ ...prev, [id]: paper }))
@@ -244,12 +269,12 @@ export default function App() {
             </button>
             {showLibs && (
               <div className="absolute right-0 mt-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-lg z-30 min-w-45 max-h-60 overflow-y-auto animate-fade-in">
-                <LibsPanel
-                  onPick={(l) => {
-                    setLibrary(l)
-                    setShowLibs(false)
-                  }}
-                />
+                  <LibsPanel
+                    onPick={(l) => {
+                      setLibrary(l)
+                      setShowLibs(false)
+                    }}
+                  />
               </div>
             )}
           </div>
@@ -347,6 +372,7 @@ export default function App() {
             <div className="overflow-x-auto">
               <PapersTable
                 papers={papers}
+                library={library}
                 onSelect={(id) => {
                   // Open a new tab for this paper if not already open
                   setTabs(tabs => {
@@ -376,9 +402,10 @@ export default function App() {
                   setActiveTab("__papers__")
                 }}
                 onRefresh={() => fetchPaper(tab.id)}
+                library={library}
                 username={username}
                 onNoteAuthorsRefresh={() => {
-                  fetch("/api/note-authors")
+                  fetch(`/api/note-authors${library ? `?library=${encodeURIComponent(library)}` : ""}`)
                     .then((r) => r.json())
                     .then((j) => setNoteAuthors(j.authors || []))
                     .catch(() => setNoteAuthors([]))
@@ -399,8 +426,9 @@ export default function App() {
               onClose={() => setShowAdd(false)}
               onAdded={() => {
                 setShowAdd(false)
-                fetchPapers().then(setPapers)
+                fetchPapers(library).then(setPapers)
               }}
+              library={library}
             />
           )}
         </main>

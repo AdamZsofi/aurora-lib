@@ -4,9 +4,11 @@ import { deletePaper } from "../api/papers"
 export function PapersTable({
   papers,
   onSelect,
+  library,
 }: {
   papers: Paper[]
   onSelect: (id: string) => void // now opens a tab in parent
+  library?: string | null
 }) {
   return (
     <table className="w-full border-collapse mt-3">
@@ -36,7 +38,7 @@ export function PapersTable({
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  deletePaper(p.id || "")
+                  deletePaper(p.id || "", library)
                 }}
                 className="px-2 py-1 rounded bg-aurora-900 text-white"
               >

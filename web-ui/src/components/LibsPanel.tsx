@@ -14,13 +14,7 @@ export function LibsPanel({ onPick }: { onPick: (l: string) => void }) {
       {libs.map((l) => (
         <button
           key={l}
-          onClick={() => {
-            fetch("/api/lib", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ library: l }),
-            }).then(() => onPick(l))
-          }}
+          onClick={() => onPick(l)}
           className="px-3 py-1 rounded bg-aurora-400 text-white"
         >
           {l}
