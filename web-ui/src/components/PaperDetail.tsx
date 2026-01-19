@@ -1,5 +1,16 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { deletePaper } from "../api/papers"
+
+type PaperDetailProps = {
+  id: string
+  paper: any | null
+  loading: boolean
+  onClose: () => void
+  onRefresh: () => void
+  onUpdatePaper?: (paper: any) => void
+  username?: string
+  onNoteAuthorsRefresh?: () => void
+}
 
 export function PaperDetail({
   id,
@@ -8,14 +19,9 @@ export function PaperDetail({
   onClose,
   onRefresh,
   onUpdatePaper,
-}: {
-  id: string
-  paper: any | null
-  loading: boolean
-  onClose: () => void
-  onRefresh: () => void
-  onUpdatePaper?: (paper: any) => void
-}) {
+  username,
+  onNoteAuthorsRefresh,
+}: PaperDetailProps) {
   const [showMeta, setShowMeta] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [uploadingPdf, setUploadingPdf] = useState(false)
@@ -26,19 +32,32 @@ export function PaperDetail({
   const [savingTags, setSavingTags] = useState(false)
   const [tagError, setTagError] = useState<string | null>(null)
   const [notes, setNotes] = useState<Array<{ author: string; text: string }>>([])
-  const [noteAuthor, setNoteAuthor] = useState("")
   const [noteText, setNoteText] = useState("")
   const [savingNote, setSavingNote] = useState(false)
   const [noteError, setNoteError] = useState<string | null>(null)
+  const [showOtherNotes, setShowOtherNotes] = useState(false)
+  const lastSavedNoteRef = useRef<string>("")
+  const autoSaveTimerRef = useRef<number | null>(null)
 
   const pdfExists = Array.isArray(paper?.files)
     ? paper.files.some((f: string) => f.toLowerCase().endsWith(".pdf"))
     : false
 
   useEffect(() => {
+    const nextNotes = Array.isArray(paper?.user_notes) ? paper.user_notes : []
+    setNotes(nextNotes)
     setTags(Array.isArray(paper?.tags) ? paper.tags : [])
-    setNotes(Array.isArray(paper?.user_notes) ? paper.user_notes : [])
-  }, [paper])
+    const cleanUser = (username || "").trim()
+    if (cleanUser) {
+      const mine = nextNotes.find((n: { author: string; text: string }) => n?.author === cleanUser)
+      const nextText = mine?.text || ""
+      setNoteText(nextText)
+      lastSavedNoteRef.current = nextText
+    } else {
+      setNoteText("")
+      lastSavedNoteRef.current = ""
+    }
+  }, [paper, username])
 
   useEffect(() => {
     fetch("/api/tags")
@@ -51,9 +70,9 @@ export function PaperDetail({
     let hash = 0
     for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0
     const hue = hash % 360
-    const bg = `hsl(${hue} 70% 60%)`
-    const text = "#0f172a"
-    return { backgroundColor: bg, color: text }
+    const backgroundColor = `hsl(${hue} 80% 85%)`
+    const color = "#0f172a"
+    return { backgroundColor, color }
   }
 
   async function saveTags(nextTags: string[]) {
@@ -81,10 +100,11 @@ export function PaperDetail({
     }
   }
 
-  async function addNote() {
-    const author = noteAuthor.trim()
+  async function saveNote() {
+    const author = (username || "").trim()
     const text = noteText.trim()
-    if (!author || !text) return
+    if (!author) return
+    if (text === lastSavedNoteRef.current.trim()) return
     setSavingNote(true)
     setNoteError(null)
     try {
@@ -97,12 +117,15 @@ export function PaperDetail({
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || "Failed to add note")
       }
-      const j = await r.json()
-      if (j?.paper) {
-        onUpdatePaper?.(j.paper)
-        setNotes(Array.isArray(j.paper.user_notes) ? j.paper.user_notes : [])
-      }
-      setNoteText("")
+      setNotes((prev) => {
+        const next = [...prev]
+        const idx = next.findIndex((n) => n?.author === author)
+        if (idx >= 0) next[idx] = { author, text }
+        else next.push({ author, text })
+        return next
+      })
+      lastSavedNoteRef.current = text
+      onNoteAuthorsRefresh?.()
     } catch (e: any) {
       setNoteError(e.message || "Failed to add note")
     } finally {
@@ -110,10 +133,25 @@ export function PaperDetail({
     }
   }
 
+  useEffect(() => {
+    if (!(username || "").trim()) return
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current)
+    }
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      saveNote()
+    }, 600)
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current)
+      }
+    }
+  }, [noteText, username])
+
   async function handleUploadPdf() {
     if (!pdfFile) return
     setUploadingPdf(true)
-    setUploadError(null)
     try {
       const form = new FormData()
       form.append("file", pdfFile)
@@ -263,43 +301,48 @@ export function PaperDetail({
             </div>
 
             <div className="mt-4">
-              <div className="text-sm font-semibold mb-1">Notes</div>
-              {notes.length === 0 && (
-                <div className="text-xs text-zinc-500">No notes yet</div>
-              )}
-              {notes.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  {notes.map((n, idx) => (
-                    <div key={idx} className="rounded border border-zinc-200 dark:border-zinc-700 p-2">
-                      <div className="text-xs text-zinc-500">{n.author}</div>
-                      <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+              <div className="text-sm font-semibold mb-1">My note</div>
+              <textarea
+                className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                placeholder={username?.trim() ? "Write your note..." : "Set your name in the header to add a note"}
+                rows={4}
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                disabled={!username?.trim()}
+              />
+              <div className="mt-2 flex items-center gap-3">
+                <span className="text-xs text-zinc-500">
+                  {savingNote ? "Saving..." : "Autosaves"}
+                </span>
+                <button
+                  className="text-sm text-aurora-700 hover:underline"
+                  onClick={() => setShowOtherNotes((s) => !s)}
+                >
+                  {showOtherNotes ? "Hide others" : "Show others"}
+                </button>
+              </div>
+              {noteError && <div className="text-xs text-rose-500 mt-1">{noteError}</div>}
+
+              {showOtherNotes && (
+                <div className="mt-3">
+                  <div className="text-sm font-semibold mb-1">Others</div>
+                  {notes.filter((n) => n?.author !== (username || "").trim()).length === 0 && (
+                    <div className="text-xs text-zinc-500">No other notes yet</div>
+                  )}
+                  {notes.filter((n) => n?.author !== (username || "").trim()).length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      {notes
+                        .filter((n) => n?.author !== (username || "").trim())
+                        .map((n, idx) => (
+                          <div key={idx} className="rounded border border-zinc-200 dark:border-zinc-700 p-2">
+                            <div className="text-xs text-zinc-500">{n.author}</div>
+                            <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+                          </div>
+                        ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
-              <div className="mt-2 flex flex-col gap-2">
-                <input
-                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full max-w-xs bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                  placeholder="Your name"
-                  value={noteAuthor}
-                  onChange={(e) => setNoteAuthor(e.target.value)}
-                />
-                <textarea
-                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                  placeholder="Write a note..."
-                  rows={3}
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                />
-                <button
-                  className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors disabled:opacity-50 w-fit"
-                  onClick={addNote}
-                  disabled={savingNote || !noteAuthor.trim() || !noteText.trim()}
-                >
-                  {savingNote ? "Saving..." : "Add note"}
-                </button>
-                {noteError && <div className="text-xs text-rose-500">{noteError}</div>}
-              </div>
             </div>
 
             <div className="mt-3">
@@ -310,7 +353,7 @@ export function PaperDetail({
                 {showMeta ? "Hide metadata" : "Show metadata"}
               </button>
               {showMeta && (
-                <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 max-h-[400px] overflow-auto rounded text-xs mt-2">
+                <pre className="bg-zinc-100 dark:bg-zinc-800 p-2 max-h-100 overflow-auto rounded text-xs mt-2">
                   {JSON.stringify(paper.raw || paper, null, 2)}
                 </pre>
               )}
@@ -320,7 +363,7 @@ export function PaperDetail({
           <div className="flex-1 min-w-0">
             <strong>PDF preview:</strong>
             {pdfExists ? (
-              <div className="h-[600px] border border-zinc-200 dark:border-zinc-700 mt-1 rounded">
+              <div className="h-150 border border-zinc-200 dark:border-zinc-700 mt-1 rounded">
                 <iframe
                   src={`/api/papers/${encodeURIComponent(id)}/pdf`}
                   className="w-full h-full"
@@ -340,7 +383,7 @@ export function PaperDetail({
                     {pdfFile ? "Change PDF" : "Choose PDF"}
                   </label>
                   {pdfFile && (
-                    <span className="text-xs text-zinc-500 truncate max-w-[240px]">{pdfFile.name}</span>
+                    <span className="text-xs text-zinc-500 truncate max-w-60">{pdfFile.name}</span>
                   )}
                   <button
                     className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"

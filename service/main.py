@@ -13,6 +13,7 @@ import urllib.request
 app = FastAPI()
 
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
+UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
 
 def papis_importable() -> bool:
     try:
@@ -111,6 +112,36 @@ def papers():
     if SAMPLE_FILE.exists():
         return {"source": "sample", "papers": json.loads(SAMPLE_FILE.read_text())}
     return {"source": "empty", "papers": []}
+
+
+@app.get("/api/ui-state")
+def get_ui_state():
+    """Return persisted UI state (tabs, activeTab)."""
+    try:
+        if not UI_STATE_FILE.exists():
+            return {"ok": True, "state": {}}
+        data = json.loads(UI_STATE_FILE.read_text())
+        if not isinstance(data, dict):
+            return {"ok": True, "state": {}}
+        return {"ok": True, "state": data}
+    except Exception:
+        return {"ok": True, "state": {}}
+
+
+@app.post("/api/ui-state")
+def set_ui_state(body: dict = Body(...)):
+    """Persist UI state (tabs, activeTab)."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid body")
+    state = {
+        "tabs": body.get("tabs") if isinstance(body.get("tabs"), list) else [],
+        "activeTab": body.get("activeTab") if isinstance(body.get("activeTab"), str) else "__papers__",
+    }
+    try:
+        UI_STATE_FILE.write_text(json.dumps(state))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to persist UI state: {e}")
+    return {"ok": True, "state": state}
 
 
 @app.get("/api/papers/{paper_id}")
@@ -255,7 +286,16 @@ def add_paper_note(paper_id: str, body: dict = Body(...)):
         notes = doc.get("user_notes") or []
         if not isinstance(notes, list):
             notes = []
-        notes.append({"author": author.strip(), "text": text.strip()})
+        clean_author = author.strip()
+        clean_text = text.strip()
+        updated = False
+        for n in notes:
+            if isinstance(n, dict) and n.get("author") == clean_author:
+                n["text"] = clean_text
+                updated = True
+                break
+        if not updated:
+            notes.append({"author": clean_author, "text": clean_text})
         doc["user_notes"] = notes
         save_doc(doc)
         return {"ok": True, "paper": _doc_to_json(doc)}
@@ -263,6 +303,27 @@ def add_paper_note(paper_id: str, body: dict = Body(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add note: {e}")
+
+@app.get("/api/note-authors")
+def get_note_authors():
+    """Return list of unique note authors across the library."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        from papis.database import get_database
+        db = get_database()
+        authors = set()
+        for doc in db.get_all_documents():
+            notes = doc.get("user_notes") or []
+            if isinstance(notes, list):
+                for n in notes:
+                    if isinstance(n, dict):
+                        a = n.get("author")
+                        if isinstance(a, str) and a.strip():
+                            authors.add(a.strip())
+        return {"authors": sorted(authors)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read note authors: {e}")
 
 def run_papis_add(file_path: Optional[str], metadata: dict) -> dict:
     try:

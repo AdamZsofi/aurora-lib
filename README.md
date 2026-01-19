@@ -14,10 +14,14 @@ See `service/README.md` and `web-ui/README.md` for local run instructions.
 ### Backend
 
 ```
-python -m venv .venv
+./scripts/ensure-venv.sh
 source .venv/bin/activate
 pip install -r service/requirements.txt
 ```
+
+Notes:
+- The helper script uses your default system Python (python3 or python) and will recreate the venv if the default version changes.
+- If you use pyenv, the included .python-version is set to "system" for this repo.
 
 ```
 source .venv/bin/activate

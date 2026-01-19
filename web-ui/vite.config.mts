@@ -9,6 +9,7 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       // Proxy /api requests to the FastAPI backend running on localhost:8000
       '/api': {
