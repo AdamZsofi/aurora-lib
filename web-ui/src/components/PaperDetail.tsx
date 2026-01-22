@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import { deletePaper } from "../api/papers"
+import {
+  apiAddPdfToPaper,
+  apiAddPaperNote,
+  apiGetPdfUrl,
+  apiGetTags,
+  apiSetPaperTags,
+} from "../api/bridge"
 
 type PaperDetailProps = {
   id: string
@@ -33,6 +40,7 @@ export function PaperDetail({
   const [tags, setTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
   const [tagError, setTagError] = useState<string | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [notes, setNotes] = useState<Array<{ author: string; text: string }>>([])
   const [noteText, setNoteText] = useState("")
   const [savingNote, setSavingNote] = useState(false)
@@ -40,6 +48,7 @@ export function PaperDetail({
   const [showOtherNotes, setShowOtherNotes] = useState(false)
   const lastSavedNoteRef = useRef<string>("")
   const autoSaveTimerRef = useRef<number | null>(null)
+  const pdfRevokeRef = useRef<(() => void) | null>(null)
 
   const pdfExists = Array.isArray(paper?.files)
     ? paper.files.some((f: string) => f.toLowerCase().endsWith(".pdf"))
@@ -62,12 +71,36 @@ export function PaperDetail({
   }, [paper, username])
 
   useEffect(() => {
-    const url = library ? `/api/tags?library=${encodeURIComponent(library)}` : "/api/tags"
-    fetch(url)
-      .then((r) => r.json())
+    apiGetTags(library)
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
   }, [library])
+
+  useEffect(() => {
+    let cancelled = false
+    pdfRevokeRef.current?.()
+    pdfRevokeRef.current = null
+    if (!pdfExists) {
+      setPdfUrl(null)
+      return
+    }
+    apiGetPdfUrl(id, library)
+      .then(({ url, revoke }) => {
+        if (cancelled) {
+          revoke?.()
+          return
+        }
+        setPdfUrl(url)
+        pdfRevokeRef.current = revoke ?? null
+      })
+      .catch(() => setPdfUrl(null))
+
+    return () => {
+      cancelled = true
+      pdfRevokeRef.current?.()
+      pdfRevokeRef.current = null
+    }
+  }, [id, library, pdfExists])
 
   function tagColor(tag: string) {
     let hash = 0
@@ -82,19 +115,7 @@ export function PaperDetail({
     setSavingTags(true)
     setTagError(null)
     try {
-      const url = library
-        ? `/api/papers/${encodeURIComponent(id)}/tags?library=${encodeURIComponent(library)}`
-        : `/api/papers/${encodeURIComponent(id)}/tags`
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags: nextTags }),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail || "Failed to save tags")
-      }
-      const j = await r.json()
+      const j = await apiSetPaperTags(id, nextTags, library)
       if (j?.paper) {
         onUpdatePaper?.(j.paper)
         setTags(Array.isArray(j.paper.tags) ? j.paper.tags : nextTags)
@@ -114,18 +135,7 @@ export function PaperDetail({
     setSavingNote(true)
     setNoteError(null)
     try {
-      const url = library
-        ? `/api/papers/${encodeURIComponent(id)}/notes?library=${encodeURIComponent(library)}`
-        : `/api/papers/${encodeURIComponent(id)}/notes`
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ author, text }),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail || "Failed to add note")
-      }
+      await apiAddPaperNote(id, author, text, library)
       setNotes((prev) => {
         const next = [...prev]
         const idx = next.findIndex((n) => n?.author === author)
@@ -162,20 +172,7 @@ export function PaperDetail({
     if (!pdfFile) return
     setUploadingPdf(true)
     try {
-      const form = new FormData()
-      form.append("file", pdfFile)
-      const url = library
-        ? `/api/papers/${encodeURIComponent(id)}/pdf?library=${encodeURIComponent(library)}`
-        : `/api/papers/${encodeURIComponent(id)}/pdf`
-      const r = await fetch(url, {
-        method: "POST",
-        body: form,
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail || "Failed to upload PDF")
-      }
-      const j = await r.json().catch(() => ({}))
+      const j = await apiAddPdfToPaper(id, pdfFile, library)
       setPdfFile(null)
       if (j?.paper) {
         onUpdatePaper?.(j.paper)
@@ -388,12 +385,16 @@ export function PaperDetail({
             <strong>PDF preview:</strong>
             {pdfExists ? (
               <div className="h-150 border border-zinc-200 dark:border-zinc-700 mt-1 rounded">
-                <iframe
-                  src={library
-                    ? `/api/papers/${encodeURIComponent(id)}/pdf?library=${encodeURIComponent(library)}`
-                    : `/api/papers/${encodeURIComponent(id)}/pdf`}
-                  className="w-full h-full"
-                />
+                {pdfUrl ? (
+                  <iframe
+                    src={pdfUrl}
+                    className="w-full h-full"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-sm text-zinc-500">
+                    Loading PDF...
+                  </div>
+                )}
               </div>
             ) : (
               <div className="mt-2 rounded border border-dashed border-zinc-300 dark:border-zinc-700 p-4 text-sm text-zinc-500 dark:text-zinc-400">
