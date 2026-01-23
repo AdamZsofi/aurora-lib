@@ -11,27 +11,27 @@ See `service/README.md` and `web-ui/README.md` for local run instructions.
 
 ## Quickstart
 
-### Backend
-
 ```
 ./scripts/ensure-venv.sh
 source .venv/bin/activate
 pip install -r service/requirements.txt
 ```
 
-Notes:
-- The helper script uses your default system Python (python3 or python) and will recreate the venv if the default version changes.
-- If you use pyenv, the included .python-version is set to "system" for this repo.
-
 ```
 source .venv/bin/activate
 uvicorn main:app --reload --port 8000 --app-dir service
 ```
 
-#### Testing
+## Architecture
 
-```
-http://127.0.0.1:8000/api/health
-http://127.0.0.1:8000/api/papers
-http://127.0.0.1:8000/api/resolve?doi=10.1145/3368089.3409743
-```
+A local FastAPI backend (Uvicorn) exposes HTTP endpoints to manage Papis libraries, fetch metadata (Crossref/OpenAlex), and serve PDFs. A React Vite frontend calls those endpoints from the browser to list, add, and manage papers, tags, notes, and PDFs. Data lives in local Papis libraries (git-backed), with optional sample JSON fallback.
+
+### Main libraries
+
+FastAPI: HTTP API server exposing paper/library operations.
+Uvicorn: ASGI server running the FastAPI app locally.
+Papis: Core library/database for managing local reference libraries.
+React: UI framework for the web frontend.
+Vite: Frontend dev server and build tool.
+TypeScript: Type-safe frontend codebase.
+python-multipart: Handles file uploads (PDFs/BibTeX) in the API.
