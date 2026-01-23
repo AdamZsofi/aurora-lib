@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Paper } from "./types/paper"
 import { fetchPapers } from "./api/papers"
-import { apiGetLib, apiGetNoteAuthors, apiGetPaper, apiHealth } from "./api/bridge"
 import { useTheme } from "./hooks/useTheme"
 import { PapersTable } from "./components/PapersTable"
 import { LibsPanel } from "./components/LibsPanel"
@@ -57,12 +56,14 @@ export default function App() {
   const { theme, setTheme } = useTheme()
 
   useEffect(() => {
-    apiHealth()
+    fetch("/api/health")
+      .then((r) => r.json())
       .then((j) => setHealth(j.status))
       .catch(() => setHealth("unavailable"))
 
     if (!library) {
-      apiGetLib()
+      fetch("/api/lib")
+        .then((r) => r.json())
         .then((j) => setLibrary(j.library))
         .catch(() => setLibrary(null))
     }
@@ -83,7 +84,8 @@ export default function App() {
     setPaperLoading({})
     setTabs(defaultTabs)
     setActiveTab("__papers__")
-    apiGetNoteAuthors(library)
+    fetch(`/api/note-authors${library ? `?library=${encodeURIComponent(library)}` : ""}`)
+      .then((r) => r.json())
       .then((j) => setNoteAuthors(j.authors || []))
       .catch(() => setNoteAuthors([]))
   }, [library])
@@ -207,7 +209,11 @@ export default function App() {
   async function fetchPaper(id: string) {
     setPaperLoading((prev) => ({ ...prev, [id]: true }))
     try {
-      const j = await apiGetPaper(id, library)
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}`
+      const r = await fetch(url)
+      const j = await r.json()
       const paper = j.paper || j
       setPaperCache((prev) => ({ ...prev, [id]: paper }))
       if (paper?.title) {
@@ -399,7 +405,8 @@ export default function App() {
                 library={library}
                 username={username}
                 onNoteAuthorsRefresh={() => {
-                  apiGetNoteAuthors(library)
+                  fetch(`/api/note-authors${library ? `?library=${encodeURIComponent(library)}` : ""}`)
+                    .then((r) => r.json())
                     .then((j) => setNoteAuthors(j.authors || []))
                     .catch(() => setNoteAuthors([]))
                 }}

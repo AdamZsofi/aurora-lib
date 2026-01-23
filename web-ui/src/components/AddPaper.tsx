@@ -1,11 +1,4 @@
 import { useEffect, useState } from "react"
-import {
-  apiAddPaper,
-  apiGetTags,
-  apiResolveBib,
-  apiResolveDoi,
-  apiResolveDois,
-} from "../api/bridge"
 
 type BatchItem = {
   id: string
@@ -93,7 +86,12 @@ export function AddPaper({
     setStatus("fetching")
     setMetadata(null)
     try {
-      const j = await apiResolveDoi(doi)
+      const r = await fetch(`/api/resolve?doi=${encodeURIComponent(doi)}`)
+      if (!r.ok) {
+        setStatus("not found")
+        return
+      }
+      const j = await r.json()
       setMetadata(j)
       const metaTags = Array.isArray(j?.tags) ? j.tags : []
       if (metaTags.length) {
@@ -114,10 +112,19 @@ export function AddPaper({
     if (!metadata) return
     setStatus("adding")
     try {
+      const form = new FormData()
       const metaWithTags = selectedTags.length
         ? { ...metadata, tags: Array.from(new Set([...(metadata.tags || []), ...selectedTags])) }
         : metadata
-      await apiAddPaper(metaWithTags, file, library)
+      form.append("metadata", JSON.stringify(metaWithTags))
+      if (file) form.append("file", file)
+
+      const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
+      const r = await fetch(url, { method: "POST", body: form })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to add paper")
+      }
       setStatus("done")
       onAdded()
     } catch (e: any) {
@@ -134,7 +141,10 @@ export function AddPaper({
     setBatchStatus("Parsing BibTeX...")
     setBatchItems([])
     try {
-      const j = await apiResolveBib(bibFile)
+      const form = new FormData()
+      form.append("file", bibFile)
+      const r = await fetch("/api/resolve-bib", { method: "POST", body: form })
+      const j = await r.json()
       const items = (j.items || []).map((item: any, i: number) => ({
         id: item.id || `entry-${i}`,
         doi: item.doi,
@@ -169,7 +179,12 @@ export function AddPaper({
     setBatchWorking(true)
     setBatchStatus("Fetching metadata for selected...")
     try {
-      const j = await apiResolveDois(selected.map((i) => i.doi))
+      const r = await fetch("/api/resolve-dois", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dois: selected.map((i) => i.doi) }),
+      })
+      const j = await r.json()
       const items = j.items || []
       setBatchItems((prev) =>
         prev.map((it) => {
@@ -212,11 +227,19 @@ export function AddPaper({
         prev.map((it) => (it.id === item.id ? { ...it, status: "adding" } : it))
       )
       try {
+        const form = new FormData()
         const metaWithTags = {
           ...item.metadata,
           tags: Array.from(new Set([...(item.metadata?.tags || []), ...(item.tags || []), ...batchTags])),
         }
-        await apiAddPaper(metaWithTags, item.file ?? null, library)
+        form.append("metadata", JSON.stringify(metaWithTags))
+        if (item.file) form.append("file", item.file)
+        const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
+        const r = await fetch(url, { method: "POST", body: form })
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          throw new Error(j.detail || "Failed to add paper")
+        }
         setBatchItems((prev) =>
           prev.map((it) => (it.id === item.id ? { ...it, status: "done" } : it))
         )
@@ -233,7 +256,9 @@ export function AddPaper({
   }
 
   useEffect(() => {
-    apiGetTags(library)
+    const url = library ? `/api/tags?library=${encodeURIComponent(library)}` : "/api/tags"
+    fetch(url)
+      .then((r) => r.json())
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
   }, [library])

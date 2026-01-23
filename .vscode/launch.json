@@ -2,21 +2,29 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Desktop: PyWebView",
+      "name": "Backend: Debug (Uvicorn --reload)",
       "type": "python",
       "request": "launch",
-      "program": "${workspaceFolder}/service/pywebview_app.py",
+      "module": "uvicorn",
+      "args": [
+        "main:app",
+        "--reload",
+        "--port", "8000",
+        "--app-dir", "service"
+      ],
       "jinja": true,
       "justMyCode": false
     },
     {
-      "name": "Desktop: PyWebView (Dev UI)",
+      "name": "Backend: Run (Uvicorn)",
       "type": "python",
       "request": "launch",
-      "program": "${workspaceFolder}/service/pywebview_app.py",
-      "env": {
-        "AURORA_UI_URL": "http://localhost:5173"
-      },
+      "module": "uvicorn",
+      "args": [
+        "main:app",
+        "--port", "8000",
+        "--app-dir", "service"
+      ],
       "jinja": true,
       "justMyCode": true
     },
@@ -32,16 +40,17 @@
   ],
   "compounds": [
     {
-      "name": "Desktop: Dev (PyWebView + Vite)",
+      "name": "Full Stack: Debug",
       "configurations": [
-        "Desktop: PyWebView (Dev UI)",
+        "Backend: Debug (Uvicorn --reload)",
         "Frontend: npm dev"
       ]
     },
     {
-      "name": "Desktop: Run (PyWebView)",
+      "name": "Full Stack: Run",
       "configurations": [
-        "Desktop: PyWebView"
+        "Backend: Run (Uvicorn)",
+        "Frontend: npm dev"
       ]
     }
   ]

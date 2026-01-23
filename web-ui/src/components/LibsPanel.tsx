@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react"
-import { apiGetLibs } from "../api/bridge"
 
 export function LibsPanel({ onPick }: { onPick: (l: string) => void }) {
   const [libs, setLibs] = useState<string[]>([])
 
   useEffect(() => {
-    apiGetLibs()
+    fetch("/api/libs")
+      .then((r) => r.json())
       .then((j) => setLibs(j.libraries || []))
   }, [])
 
