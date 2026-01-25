@@ -228,9 +228,14 @@ export function AddPaper({
       )
       try {
         const form = new FormData()
+        const baseTags = Array.isArray(item.tags)
+          ? item.tags
+          : Array.isArray(item.metadata?.tags)
+            ? item.metadata.tags
+            : []
         const metaWithTags = {
           ...item.metadata,
-          tags: Array.from(new Set([...(item.metadata?.tags || []), ...(item.tags || []), ...batchTags])),
+          tags: Array.from(new Set([...(baseTags || []), ...batchTags])),
         }
         form.append("metadata", JSON.stringify(metaWithTags))
         if (item.file) form.append("file", item.file)

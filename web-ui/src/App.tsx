@@ -47,13 +47,20 @@ export default function App() {
   })
   const [paperCache, setPaperCache] = useState<Record<string, any>>({})
   const [paperLoading, setPaperLoading] = useState<Record<string, boolean>>({})
-  const [username, setUsername] = useState<string>("")
-  const [noteAuthors, setNoteAuthors] = useState<string[]>([])
   const libsDropdownRef = useRef<HTMLDivElement>(null)
   const tabsContainerRef = useRef<HTMLDivElement>(null)
   const [tabsOverflowOpen, setTabsOverflowOpen] = useState(false)
   const [tabsContainerWidth, setTabsContainerWidth] = useState(0)
   const { theme, setTheme } = useTheme()
+  const [showSetup, setShowSetup] = useState(false)
+  const [setupPath, setSetupPath] = useState("")
+  const [setupLibraryName, setSetupLibraryName] = useState("paper-lib")
+  const [setupVaultName, setSetupVaultName] = useState("notes")
+  const [setupError, setSetupError] = useState<string | null>(null)
+  const [setupWorking, setSetupWorking] = useState(false)
+  const [setupDone, setSetupDone] = useState(false)
+  const [openVaultError, setOpenVaultError] = useState<string | null>(null)
+  const [openVaultWorking, setOpenVaultWorking] = useState(false)
 
   useEffect(() => {
     fetch("/api/health")
@@ -84,10 +91,6 @@ export default function App() {
     setPaperLoading({})
     setTabs(defaultTabs)
     setActiveTab("__papers__")
-    fetch(`/api/note-authors${library ? `?library=${encodeURIComponent(library)}` : ""}`)
-      .then((r) => r.json())
-      .then((j) => setNoteAuthors(j.authors || []))
-      .catch(() => setNoteAuthors([]))
   }, [library])
 
   useEffect(() => {
@@ -111,25 +114,6 @@ export default function App() {
       setActiveTab("__papers__")
     }
   }, [tabs, activeTab])
-
-  // Restore username from localStorage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("aurora.username")
-      if (raw) setUsername(raw)
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  // Persist username
-  useEffect(() => {
-    try {
-      localStorage.setItem("aurora.username", username)
-    } catch {
-      // ignore
-    }
-  }, [username])
 
   // global escape handler to close modals and dropdown
   useEffect(() => {
@@ -232,6 +216,65 @@ export default function App() {
     }
   }, [activeTab, paperCache])
 
+  async function submitSetupLibrary() {
+    if (!setupPath.trim()) {
+      setSetupError("Please provide a base directory")
+      return
+    }
+    setSetupWorking(true)
+    setSetupError(null)
+    try {
+      const r = await fetch("/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: setupPath.trim(),
+          library: setupLibraryName.trim() || "aurora",
+          vault: setupVaultName.trim() || "obsidian-vault",
+        }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to set up library")
+      }
+      const j = await r.json()
+      if (j?.library) setLibrary(j.library)
+      setSetupDone(true)
+    } catch (e: any) {
+      setSetupError(e.message || "Failed to set up library")
+    } finally {
+      setSetupWorking(false)
+    }
+  }
+
+  async function openObsidianVault() {
+    setOpenVaultError(null)
+    setOpenVaultWorking(true)
+    try {
+      const r = await fetch("/api/obsidian/open-vault", { method: "POST" })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to open Obsidian")
+      }
+    } catch (e: any) {
+      setOpenVaultError(e.message || "Failed to open Obsidian")
+    } finally {
+      setOpenVaultWorking(false)
+    }
+  }
+
+  async function openObsidianFromHeader() {
+    try {
+      const r = await fetch("/api/obsidian/open-vault", { method: "POST" })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to open Obsidian")
+      }
+    } catch (e: any) {
+      alert(e.message || "Failed to open Obsidian")
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-sans">
       {/* Header */}
@@ -241,21 +284,6 @@ export default function App() {
           <h1 className="text-3xl font-bold text-aurora-500 dark:text-aurora-400 m-0">Aurora Lib</h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-zinc-500">User</span>
-            <input
-              className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 w-40"
-              placeholder="Your name"
-              value={username}
-              list="note-authors"
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <datalist id="note-authors">
-              {noteAuthors.map((a) => (
-                <option key={a} value={a} />
-              ))}
-            </datalist>
-          </div>
           <div className="relative" ref={libsDropdownRef}>
             <h2 className="sr-only">Library:</h2>
             <button
@@ -274,10 +302,27 @@ export default function App() {
                       setLibrary(l)
                       setShowLibs(false)
                     }}
+                    onSetup={() => {
+                      setSetupError(null)
+                      setSetupDone(false)
+                      setOpenVaultError(null)
+                      setShowLibs(false)
+                      setShowSetup(true)
+                    }}
                   />
               </div>
             )}
           </div>
+          <button
+            className="px-3 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors flex items-center gap-2"
+            onClick={openObsidianFromHeader}
+            title="Open Obsidian"
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4 text-purple-500" fill="currentColor" aria-hidden="true">
+              <path d="M16.85 3.15 12 1 7.15 3.15 4 8l1.5 7.5L12 23l6.5-7.5L20 8l-3.15-4.85ZM12 20.1l-4.95-5.7L6 8.4l2.6-3.95L12 3l3.4 1.45L18 8.4l-1.05 6.0L12 20.1Z" />
+            </svg>
+            Notes
+          </button>
         </div>
       </header>
 
@@ -403,13 +448,6 @@ export default function App() {
                 }}
                 onRefresh={() => fetchPaper(tab.id)}
                 library={library}
-                username={username}
-                onNoteAuthorsRefresh={() => {
-                  fetch(`/api/note-authors${library ? `?library=${encodeURIComponent(library)}` : ""}`)
-                    .then((r) => r.json())
-                    .then((j) => setNoteAuthors(j.authors || []))
-                    .catch(() => setNoteAuthors([]))
-                }}
                 onUpdatePaper={(paper) => {
                   if (!paper) return
                   setPaperCache((prev) => ({ ...prev, [tab.id]: paper }))
@@ -430,6 +468,87 @@ export default function App() {
               }}
               library={library}
             />
+          )}
+
+          {showSetup && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
+              <div className="bg-white dark:bg-zinc-900 rounded-lg p-6 shadow-xl w-full max-w-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold">Set up new Aurora lib</h2>
+                  <button
+                    className="text-zinc-400 hover:text-zinc-700"
+                    onClick={() => setShowSetup(false)}
+                    aria-label="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <label className="text-sm font-medium">Base directory</label>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    placeholder="/path/to/aurora-repo"
+                    value={setupPath}
+                    onChange={(e) => setSetupPath(e.target.value)}
+                  />
+
+                  <label className="text-sm font-medium">Library name</label>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    value={setupLibraryName}
+                    onChange={(e) => setSetupLibraryName(e.target.value)}
+                  />
+
+                  <label className="text-sm font-medium">Obsidian vault folder</label>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    value={setupVaultName}
+                    onChange={(e) => setSetupVaultName(e.target.value)}
+                  />
+
+                  {setupError && (
+                    <div className="text-sm text-rose-500">{setupError}</div>
+                  )}
+
+                  {setupDone && (
+                    <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 text-emerald-900 p-3 text-sm">
+                      Setup complete. Obidian sets up the vault when it is opened the first time. (Use button below.)
+                    </div>
+                  )}
+                  {openVaultError && (
+                    <div className="text-sm text-rose-500">{openVaultError}</div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2 mt-6">
+                  {setupDone && (
+                    <div className="flex items-center gap-3">
+                      <button
+                        className="px-3 py-1 rounded border border-emerald-400 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                        onClick={openObsidianVault}
+                        disabled={openVaultWorking}
+                      >
+                        {openVaultWorking ? "Opening..." : "Open in Obsidian"}
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    className="px-3 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    onClick={() => setShowSetup(false)}
+                  >
+                    Close
+                  </button>
+                  <button
+                    className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
+                    onClick={submitSetupLibrary}
+                    disabled={setupWorking || setupDone}
+                  >
+                    {setupWorking ? "Setting up..." : setupDone ? "Created" : "Create"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </main>
       </div>

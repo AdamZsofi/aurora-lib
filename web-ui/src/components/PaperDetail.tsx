@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { deletePaper } from "../api/papers"
 
 type PaperDetailProps = {
@@ -9,8 +9,6 @@ type PaperDetailProps = {
   onRefresh: () => void
   onUpdatePaper?: (paper: any) => void
   library?: string | null
-  username?: string
-  onNoteAuthorsRefresh?: () => void
 }
 
 export function PaperDetail({
@@ -21,8 +19,6 @@ export function PaperDetail({
   onRefresh,
   onUpdatePaper,
   library,
-  username,
-  onNoteAuthorsRefresh,
 }: PaperDetailProps) {
   const [showMeta, setShowMeta] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
@@ -33,33 +29,19 @@ export function PaperDetail({
   const [tags, setTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
   const [tagError, setTagError] = useState<string | null>(null)
-  const [notes, setNotes] = useState<Array<{ author: string; text: string }>>([])
-  const [noteText, setNoteText] = useState("")
-  const [savingNote, setSavingNote] = useState(false)
-  const [noteError, setNoteError] = useState<string | null>(null)
-  const [showOtherNotes, setShowOtherNotes] = useState(false)
-  const lastSavedNoteRef = useRef<string>("")
-  const autoSaveTimerRef = useRef<number | null>(null)
+  const [readState, setReadState] = useState<string>("unread")
+  const [savingState, setSavingState] = useState(false)
+  const [stateError, setStateError] = useState<string | null>(null)
 
   const pdfExists = Array.isArray(paper?.files)
     ? paper.files.some((f: string) => f.toLowerCase().endsWith(".pdf"))
     : false
 
   useEffect(() => {
-    const nextNotes = Array.isArray(paper?.user_notes) ? paper.user_notes : []
-    setNotes(nextNotes)
     setTags(Array.isArray(paper?.tags) ? paper.tags : [])
-    const cleanUser = (username || "").trim()
-    if (cleanUser) {
-      const mine = nextNotes.find((n: { author: string; text: string }) => n?.author === cleanUser)
-      const nextText = mine?.text || ""
-      setNoteText(nextText)
-      lastSavedNoteRef.current = nextText
-    } else {
-      setNoteText("")
-      lastSavedNoteRef.current = ""
-    }
-  }, [paper, username])
+    const nextState = paper?.read_state || paper?.raw?.aurora_read_state || "unread"
+    setReadState(nextState)
+  }, [paper])
 
   useEffect(() => {
     const url = library ? `/api/tags?library=${encodeURIComponent(library)}` : "/api/tags"
@@ -106,57 +88,44 @@ export function PaperDetail({
     }
   }
 
-  async function saveNote() {
-    const author = (username || "").trim()
-    const text = noteText.trim()
-    if (!author) return
-    if (text === lastSavedNoteRef.current.trim()) return
-    setSavingNote(true)
-    setNoteError(null)
+  const readStateOptions = [
+    { value: "unread", label: "⚪ Unread" },
+    { value: "want_to_read", label: "⭐ Want to read" },
+    { value: "read_abstract", label: "📄 Read: abstract" },
+    { value: "read_shallow", label: "📘 Read: shallow" },
+    { value: "read_deep", label: "📚 Read: deep" },
+  ]
+
+  async function saveReadState(nextState: string) {
+    setSavingState(true)
+    setStateError(null)
     try {
       const url = library
-        ? `/api/papers/${encodeURIComponent(id)}/notes?library=${encodeURIComponent(library)}`
-        : `/api/papers/${encodeURIComponent(id)}/notes`
+        ? `/api/papers/${encodeURIComponent(id)}/state?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/state`
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ author, text }),
+        body: JSON.stringify({ state: nextState }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail || "Failed to add note")
+        throw new Error(j.detail || "Failed to save read state")
       }
-      setNotes((prev) => {
-        const next = [...prev]
-        const idx = next.findIndex((n) => n?.author === author)
-        if (idx >= 0) next[idx] = { author, text }
-        else next.push({ author, text })
-        return next
-      })
-      lastSavedNoteRef.current = text
-      onNoteAuthorsRefresh?.()
+      const j = await r.json()
+      if (j?.paper) {
+        onUpdatePaper?.(j.paper)
+        setReadState(j.paper.read_state || nextState)
+      } else {
+        setReadState(nextState)
+      }
     } catch (e: any) {
-      setNoteError(e.message || "Failed to add note")
+      setStateError(e.message || "Failed to save read state")
     } finally {
-      setSavingNote(false)
+      setSavingState(false)
     }
   }
 
-  useEffect(() => {
-    if (!(username || "").trim()) return
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current)
-    }
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      saveNote()
-    }, 600)
-
-    return () => {
-      if (autoSaveTimerRef.current) {
-        window.clearTimeout(autoSaveTimerRef.current)
-      }
-    }
-  }, [noteText, username])
 
   async function handleUploadPdf() {
     if (!pdfFile) return
@@ -219,7 +188,19 @@ export function PaperDetail({
       {!loading && paper && (
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold mb-1">{paper.title}</h3>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-lg font-semibold">{paper.title}</h3>
+              <button
+                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                title="Copy title"
+                onClick={() => paper.title && navigator.clipboard.writeText(paper.title)}
+              >
+                <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </button>
+            </div>
             <div className="mb-1">
               <strong>Authors:</strong>{" "}
               {Array.isArray(paper.authors)
@@ -227,40 +208,50 @@ export function PaperDetail({
                 : paper.authors}
             </div>
             <div className="mb-1">
-              <strong>DOI:</strong> {paper.doi || "(none)"}
-              {paper.doi && (
-                <button
-                  className="ml-2 text-xs px-2 py-0.5 rounded border border-aurora-400 text-aurora-700 hover:bg-aurora-50 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => {
-                    const doi = encodeURIComponent(paper.doi)
-                    window.open(`https://inciteful.xyz/p/${doi}`, "_blank", "noopener,noreferrer")
-                  }}
-                  title="Open in Inciteful"
+              <strong>DOI:</strong>{" "}
+              {paper.doi ? (
+                <a
+                  className="text-aurora-700 hover:underline break-all"
+                  href={paper.raw?.URL || paper.raw?.url || paper.raw?.link || `https://doi.org/${encodeURIComponent(paper.doi)}`}
+                  target="_blank"
+                  rel="noreferrer"
                 >
-                  Inciteful
-                </button>
+                  {paper.doi}
+                </a>
+              ) : (
+                "(none)"
+              )}
+              {paper.doi && (
+                <span className="inline-flex items-center gap-2 ml-2">
+                  <button
+                    className="text-xs px-2 py-0.5 rounded border border-aurora-400 text-aurora-700 hover:bg-aurora-50 dark:hover:bg-zinc-800 transition-colors"
+                    onClick={() => {
+                      const doi = encodeURIComponent(paper.doi)
+                      window.open(`https://inciteful.xyz/p/${doi}`, "_blank", "noopener,noreferrer")
+                    }}
+                    title="Open in Inciteful"
+                  >
+                    Inciteful
+                  </button>
+                  <button
+                    className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    title="Copy DOI"
+                    onClick={() => navigator.clipboard.writeText(paper.doi)}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
+                </span>
               )}
             </div>
             <div className="mb-1">
               <strong>Year:</strong> {paper.year || "(unknown)"}
             </div>
-            {paper.raw?.URL || paper.raw?.url || paper.raw?.link ? (
-              <div className="mb-1">
-                <strong>URL:</strong>{" "}
-                <a
-                  className="text-aurora-700 hover:underline break-all"
-                  href={paper.raw?.URL || paper.raw?.url || paper.raw?.link}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {paper.raw?.URL || paper.raw?.url || paper.raw?.link}
-                </a>
-              </div>
-            ) : null}
-
             <div className="mt-2">
               <div className="text-sm font-semibold mb-1">Tags</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {tags.length === 0 && (
                   <span className="text-xs text-zinc-500">No tags yet</span>
                 )}
@@ -280,7 +271,7 @@ export function PaperDetail({
                   </span>
                 ))}
               </div>
-              <div className="mt-2 flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <input
                   className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full max-w-xs bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                   placeholder="Add tag"
@@ -324,51 +315,6 @@ export function PaperDetail({
               {tagError && <div className="text-xs text-rose-500 mt-1">{tagError}</div>}
             </div>
 
-            <div className="mt-4">
-              <div className="text-sm font-semibold mb-1">My note</div>
-              <textarea
-                className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                placeholder={username?.trim() ? "Write your note..." : "Set your name in the header to add a note"}
-                rows={4}
-                value={noteText}
-                onChange={(e) => setNoteText(e.target.value)}
-                disabled={!username?.trim()}
-              />
-              <div className="mt-2 flex items-center gap-3">
-                <span className="text-xs text-zinc-500">
-                  {savingNote ? "Saving..." : "Autosaves"}
-                </span>
-                <button
-                  className="text-sm text-aurora-700 hover:underline"
-                  onClick={() => setShowOtherNotes((s) => !s)}
-                >
-                  {showOtherNotes ? "Hide others" : "Show others"}
-                </button>
-              </div>
-              {noteError && <div className="text-xs text-rose-500 mt-1">{noteError}</div>}
-
-              {showOtherNotes && (
-                <div className="mt-3">
-                  <div className="text-sm font-semibold mb-1">Others</div>
-                  {notes.filter((n) => n?.author !== (username || "").trim()).length === 0 && (
-                    <div className="text-xs text-zinc-500">No other notes yet</div>
-                  )}
-                  {notes.filter((n) => n?.author !== (username || "").trim()).length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      {notes
-                        .filter((n) => n?.author !== (username || "").trim())
-                        .map((n, idx) => (
-                          <div key={idx} className="rounded border border-zinc-200 dark:border-zinc-700 p-2">
-                            <div className="text-xs text-zinc-500">{n.author}</div>
-                            <div className="text-sm whitespace-pre-wrap">{n.text}</div>
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
             <div className="mt-3">
               <button
                 className="text-sm text-aurora-700 hover:underline"
@@ -385,6 +331,27 @@ export function PaperDetail({
           </div>
 
           <div className="flex-1 min-w-0">
+            <div className="mb-2">
+              <div className="text-sm font-semibold mb-1">Reading status</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {readStateOptions.map((o) => (
+                  <button
+                    key={o.value}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      readState === o.value
+                        ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                    }`}
+                    onClick={() => saveReadState(o.value)}
+                    disabled={savingState}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+                {savingState && <span className="text-xs text-zinc-500">Saving...</span>}
+              </div>
+              {stateError && <div className="text-xs text-rose-500 mt-1">{stateError}</div>}
+            </div>
             <strong>PDF preview:</strong>
             {pdfExists ? (
               <div className="h-150 border border-zinc-200 dark:border-zinc-700 mt-1 rounded">

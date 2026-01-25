@@ -9,11 +9,32 @@ import os
 import re
 import urllib.parse
 import urllib.request
+import webbrowser
+import subprocess
 
 app = FastAPI()
 
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
 UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
+AURORA_CONFIG_FILE = Path(__file__).parent / ".aurora_config.json"
+DEFAULT_NOTES_DIR = "paper-notes"
+DEFAULT_ARCHIVE_DIR = "archive"
+NOTE_BLOCK_BEGIN = "%% AURORA:BEGIN %%"
+NOTE_BLOCK_END = "%% AURORA:END %%"
+READ_STATE_VALUES = [
+    "unread",
+    "want_to_read",
+    "read_abstract",
+    "read_shallow",
+    "read_deep",
+]
+READ_STATE_EMOJI = {
+    "unread": "⚪",
+    "want_to_read": "⭐",
+    "read_abstract": "📄",
+    "read_shallow": "📘",
+    "read_deep": "📚",
+}
 
 def _set_library_from_param(library: Optional[str]) -> None:
     if not library:
@@ -76,6 +97,7 @@ def _doc_to_json(doc) -> dict:
         "files": doc.get("files") or [],
         "tags": doc.get("tags") or [],
         "user_notes": doc.get("user_notes") or [],
+        "read_state": doc.get("aurora_read_state") or "unread",
         "folder_name": None,
         "raw": dict(doc),
     }
@@ -124,6 +146,76 @@ def papers(library: Optional[str] = None):
     if SAMPLE_FILE.exists():
         return {"source": "sample", "papers": json.loads(SAMPLE_FILE.read_text())}
     return {"source": "empty", "papers": []}
+
+
+@app.post("/api/setup")
+def setup_aurora(body: dict = Body(...)):
+    """Set up a new Aurora repo with papis library + obsidian vault."""
+    base = body.get("path") if isinstance(body, dict) else None
+    if not base:
+        raise HTTPException(status_code=400, detail="Missing 'path'")
+
+    base_path = Path(base).expanduser().resolve()
+    library_name = body.get("library") if isinstance(body, dict) else None
+    vault_name = body.get("vault") if isinstance(body, dict) else None
+    library_name = library_name or "aurora"
+    vault_name = vault_name or "obsidian-vault"
+
+    library_dir_name = safe_filename(library_name) or "aurora"
+    library_path = base_path / library_dir_name
+    vault_path = base_path / vault_name
+    notes_path, archive_path = _ensure_obsidian_dirs(vault_path)
+
+    library_path.mkdir(parents=True, exist_ok=True)
+
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+
+    try:
+        import papis.config as papis_config
+
+        config = papis_config.get_configuration()
+        if not config.has_section(library_name):
+            config.add_section(library_name)
+        config[library_name]["dir"] = str(library_path)
+
+        general_section = papis_config.get_general_settings_name()
+        if not config.has_section(general_section):
+            config.add_section(general_section)
+        if "default-library" not in config[general_section]:
+            config[general_section]["default-library"] = library_name
+
+        config_folder = papis_config.get_config_folder()
+        os.makedirs(config_folder, exist_ok=True)
+        config_file = papis_config.get_config_file()
+        with open(config_file, "w", encoding="utf-8") as configfile:
+            config.write(configfile)
+
+        papis_config.set_lib_from_name(library_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to configure papis: {e}")
+
+    aurora_config = {
+        "repo_path": str(base_path),
+        "library_name": library_name,
+        "library_path": str(library_path),
+        "vault_name": vault_name,
+        "vault_path": str(vault_path),
+        "notes_path": str(notes_path),
+        "archive_path": str(archive_path),
+    }
+    try:
+        _save_aurora_config(aurora_config)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to persist aurora config: {e}")
+
+    return {
+        "ok": True,
+        "library": library_name,
+        "library_path": str(library_path),
+        "vault_path": str(vault_path),
+        "notes_path": str(notes_path),
+    }
 
 
 @app.get("/api/ui-state")
@@ -279,6 +371,41 @@ def set_paper_tags(paper_id: str, body: dict = Body(...), library: Optional[str]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update tags: {e}")
 
+
+@app.post("/api/papers/{paper_id}/state")
+def set_paper_state(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
+    """Set read state for a paper. Body: {'state': '<value>'}"""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    state = body.get("state") if isinstance(body, dict) else None
+    if not isinstance(state, str) or state not in READ_STATE_VALUES:
+        raise HTTPException(status_code=400, detail="Invalid 'state'")
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+        from papis.api import save_doc
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        doc["aurora_read_state"] = state
+        save_doc(doc)
+        doc_json = _doc_to_json(doc)
+        config = _get_obsidian_config()
+        if config:
+            try:
+                note_path = _write_note_if_missing(doc_json, library, config)
+                if note_path:
+                    _upsert_note_header(note_path, _note_header(doc_json, library))
+            except Exception:
+                pass
+        return {"ok": True, "paper": doc_json}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update read state: {e}")
+
 @app.post("/api/papers/{paper_id}/notes")
 def add_paper_note(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
     """Append a user note to a paper. Body: {'author': 'name', 'text': 'note'}"""
@@ -373,11 +500,379 @@ def safe_filename(value: str) -> str:
     value = FILENAME_SAFE.sub("_", value)
     return value[:255]  # filesystem-safe length
 
+def _note_slug(title: str) -> str:
+    value = (title or "").strip().lower()
+    value = re.sub(r"\s+", "-", value)
+    value = re.sub(r"[^a-z0-9._-]", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value[:255] or "paper"
+
+def _load_aurora_config() -> dict:
+    try:
+        if not AURORA_CONFIG_FILE.exists():
+            return {}
+        data = json.loads(AURORA_CONFIG_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _save_aurora_config(data: dict) -> None:
+    AURORA_CONFIG_FILE.write_text(json.dumps(data, indent=2))
+
+def _get_obsidian_config() -> Optional[dict]:
+    data = _load_aurora_config()
+    vault_path = data.get("vault_path")
+    notes_path = data.get("notes_path")
+    if not vault_path or not notes_path:
+        return None
+    if not data.get("archive_path"):
+        data["archive_path"] = str(Path(notes_path) / DEFAULT_ARCHIVE_DIR)
+    return data
+
+def _ensure_obsidian_dirs(vault_path: Path) -> tuple[Path, Path]:
+    notes_path = vault_path / DEFAULT_NOTES_DIR
+    archive_path = notes_path / DEFAULT_ARCHIVE_DIR
+    notes_path.mkdir(parents=True, exist_ok=True)
+    archive_path.mkdir(parents=True, exist_ok=True)
+    return notes_path, archive_path
+
+def _note_header(doc: dict, library: Optional[str]) -> str:
+    return "\n".join([
+        _build_frontmatter(doc, library),
+        "",
+        _build_generated_block(doc),
+        "",
+        "## Notes",
+        "",
+    ])
+
+def _build_frontmatter(doc: dict, library: Optional[str]) -> str:
+    def j(value):
+        return json.dumps(value, ensure_ascii=False)
+
+    authors = doc.get("authors") if isinstance(doc.get("authors"), list) else []
+    raw_tags = doc.get("tags") if isinstance(doc.get("tags"), list) else []
+    tags = [str(t).strip().replace(" ", "-") for t in raw_tags if str(t).strip()]
+    read_state = doc.get("read_state") or "unread"
+    read_state = read_state if read_state in READ_STATE_VALUES else "unread"
+
+    return "\n".join([
+        "---",
+        f"title: {j(doc.get('title') or '')}",
+        f"authors: {j(authors)}",
+        f"doi: {j(doc.get('doi') or '')}",
+        f"url: {j(doc.get('raw', {}).get('URL') or doc.get('raw', {}).get('url') or doc.get('raw', {}).get('link') or '')}",
+        f"year: {j(doc.get('year') or '')}",
+        f"tags: {j(tags)}",
+        f"papis_id: {j(doc.get('id') or '')}",
+        f"library: {j(library or '')}",
+        f"read_state: {j(read_state)}",
+        "---",
+    ])
+
+def _build_generated_block(doc: dict) -> str:
+    read_state = doc.get("read_state") or "unread"
+    read_state = read_state if read_state in READ_STATE_VALUES else "unread"
+    read_state_label = {
+        "unread": "Unread",
+        "want_to_read": "Want to read",
+        "read_abstract": "Read: abstract",
+        "read_shallow": "Read: shallow",
+        "read_deep": "Read: deep",
+    }.get(read_state, "Unread")
+    read_state_line = f"{READ_STATE_EMOJI.get(read_state, '⚪')} {read_state_label}"
+
+    pdf_path = _select_pdf_path([str(f) for f in (doc.get("files", []) or [])])
+    pdf_link = None
+    if pdf_path:
+        pdf_url = "file://" + urllib.parse.quote(str(pdf_path))
+        pdf_link = f"PDF: [Open]({pdf_url})"
+
+    lines = [
+        NOTE_BLOCK_BEGIN,
+        "> ⚠️ This header is generated by Aurora. Edit below the Notes section.",
+        "",
+        f"Read state: {read_state_line}",
+    ]
+    if pdf_link:
+        lines.append(pdf_link)
+    lines.extend(["", NOTE_BLOCK_END])
+    return "\n".join(lines)
+
+def _upsert_note_header(note_path: Path, header: str) -> None:
+    if not note_path.exists():
+        note_path.write_text(header, encoding="utf-8")
+        return
+
+    content = note_path.read_text(encoding="utf-8")
+    body = _strip_frontmatter(content)
+    body = _strip_generated_block(body)
+
+    new_content = "\n".join([
+        _build_frontmatter_from_header(header),
+        "",
+        _build_generated_from_header(header),
+        "",
+        body.lstrip("\n"),
+    ])
+
+    note_path.write_text(new_content, encoding="utf-8")
+
+def _strip_frontmatter(content: str) -> str:
+    if not content.startswith("---"):
+        return content
+    end_idx = content.find("\n---", 3)
+    if end_idx == -1:
+        return content
+    end_idx += len("\n---")
+    return content[end_idx:]
+
+def _strip_generated_block(content: str) -> str:
+    if NOTE_BLOCK_BEGIN in content and NOTE_BLOCK_END in content:
+        start = content.index(NOTE_BLOCK_BEGIN)
+        end = content.index(NOTE_BLOCK_END) + len(NOTE_BLOCK_END)
+        return content[:start] + content[end:]
+    return content
+
+def _build_frontmatter_from_header(header: str) -> str:
+    if header.startswith("---"):
+        end_idx = header.find("\n---", 3)
+        if end_idx != -1:
+            return header[:end_idx + len("\n---")]
+    return header
+
+def _build_generated_from_header(header: str) -> str:
+    if NOTE_BLOCK_BEGIN in header and NOTE_BLOCK_END in header:
+        start = header.index(NOTE_BLOCK_BEGIN)
+        end = header.index(NOTE_BLOCK_END) + len(NOTE_BLOCK_END)
+        return header[start:end]
+    return ""
+
+def _write_note_if_missing(doc: dict, library: Optional[str], config: dict) -> Optional[Path]:
+    notes_path = Path(config["notes_path"])
+    notes_path.mkdir(parents=True, exist_ok=True)
+    archive_path = Path(config["archive_path"])
+    archive_path.mkdir(parents=True, exist_ok=True)
+
+    existing = _find_note_by_papis_id(notes_path, doc.get("id") or "")
+    if existing is not None:
+        _upsert_note_header(existing, _note_header(doc, library))
+        return existing
+
+    doi = doc.get("doi") or ""
+    archived_by_doi = _find_note_by_doi(archive_path, doi)
+    if archived_by_doi:
+        restored = _unique_note_path(notes_path / archived_by_doi.name, [archive_path])
+        archived_by_doi.replace(restored)
+        _upsert_note_header(restored, _note_header(doc, library))
+        return restored
+
+    title = doc.get("title") or doc.get("id") or "paper"
+    filename = f"{_note_slug(title)}.md"
+    note_path = _unique_note_path(notes_path / filename, [archive_path])
+    _upsert_note_header(note_path, _note_header(doc, library))
+    return note_path
+
+def _unique_note_path(path: Path, extra_paths: Optional[list[Path]] = None) -> Path:
+    extra_paths = extra_paths or []
+    if not path.exists() and not any((p / path.name).exists() for p in extra_paths):
+        return path
+    base = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{base}-{counter}{suffix}"
+        if not candidate.exists() and not any((p / candidate.name).exists() for p in extra_paths):
+            return candidate
+        counter += 1
+
+def _find_note_by_doi(notes_path: Path, doi: str) -> Optional[Path]:
+    if not doi or not notes_path.exists():
+        return None
+    for path in notes_path.glob("*.md"):
+        try:
+            content = path.read_text(encoding="utf-8")
+            extracted = _extract_doi_from_note(content)
+            if extracted and extracted.lower() == doi.lower():
+                return path
+        except Exception:
+            continue
+    return None
+
+def _extract_doi_from_note(content: str) -> Optional[str]:
+    if not content.startswith("---"):
+        return None
+    end_idx = content.find("\n---", 3)
+    if end_idx == -1:
+        return None
+    frontmatter = content[:end_idx + len("\n---")]
+    m = re.search(r"^doi:\s*(.*)$", frontmatter, flags=re.MULTILINE)
+    if not m:
+        return None
+    value = m.group(1).strip()
+    value = value.strip('"')
+    return value
+
+def _find_note_by_papis_id(notes_path: Path, papis_id: str) -> Optional[Path]:
+    if not papis_id or not notes_path.exists():
+        return None
+    for path in notes_path.glob("*.md"):
+        try:
+            content = path.read_text(encoding="utf-8")
+            if f"papis_id: {json.dumps(papis_id)}" in content:
+                return path
+        except Exception:
+            continue
+    return None
+
+def _archive_note_for_doc(doc: dict, config: dict) -> Optional[Path]:
+    notes_path = Path(config["notes_path"])
+    archive_path = Path(config["archive_path"])
+    archive_path.mkdir(parents=True, exist_ok=True)
+    papis_id = doc.get("id") or ""
+    note_path = _find_note_by_papis_id(notes_path, papis_id)
+    if note_path is None:
+        title = doc.get("title") or papis_id or "paper"
+        fallback = notes_path / f"{_note_slug(title)}.md"
+        note_path = fallback if fallback.exists() else None
+    if note_path is None:
+        return None
+    dest = archive_path / note_path.name
+    counter = 1
+    while dest.exists():
+        dest = archive_path / f"{note_path.stem}-{counter}{note_path.suffix}"
+        counter += 1
+    note_path.replace(dest)
+    return dest
+
+def _launch_obsidian(path: Optional[str] = None, debug: bool = False) -> tuple[bool, dict]:
+    def _build_env() -> dict:
+        env = dict(os.environ)
+        env.pop("ELECTRON_RUN_AS_NODE", None)
+        path_value = env.get("PATH", "")
+        for p in ["/usr/local/bin", "/usr/bin", "/bin"]:
+            if p not in path_value.split(":" ):
+                path_value = f"{p}:{path_value}" if path_value else p
+        env["PATH"] = path_value
+        return env
+
+    def _run(args: list[str], env: dict) -> tuple[bool, dict]:
+        if debug:
+            result = subprocess.run(args, capture_output=True, text=True, env=env)
+            info = {
+                "method": "run",
+                "args": args,
+                "returncode": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+            return result.returncode == 0, info
+
+        subprocess.Popen(
+            args,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+        return True, {"method": "spawn", "args": args}
+
+    if not shutil.which("gtk-launch"):
+        return False, {"error": "gtk-launch not found"}
+
+    env = _build_env()
+    for desktop_id in ["obsidian", "md.obsidian.Obsidian"]:
+        ok, info = _run(["gtk-launch", desktop_id], env)
+        if ok:
+            return True, info
+
+    return False, {"error": "gtk-launch failed", "env": {
+        "PATH": env.get("PATH"),
+        "DISPLAY": env.get("DISPLAY"),
+        "WAYLAND_DISPLAY": env.get("WAYLAND_DISPLAY"),
+        "XDG_RUNTIME_DIR": env.get("XDG_RUNTIME_DIR"),
+        "ELECTRON_RUN_AS_NODE": os.environ.get("ELECTRON_RUN_AS_NODE"),
+    }}
+
 def _normalize_tag(tag: str) -> str:
     tag = tag.strip().lower()
     tag = re.sub(r"\s*\([^)]*\)", "", tag)
     tag = re.sub(r"\s+", " ", tag).strip()
     return tag
+
+def _select_pdf_path(files: list[str]) -> Optional[Path]:
+    if not files:
+        return None
+    preferred = None
+    for f in files:
+        name = str(f).lower()
+        if name.endswith(".pdf") and ("annotated" in name or "dirty" in name):
+            preferred = Path(f)
+            break
+    if preferred:
+        return preferred
+    for f in files:
+        if str(f).lower().endswith(".pdf"):
+            return Path(f)
+    return None
+
+def _ensure_dual_pdfs(doc, source_file: Optional[Path]) -> None:
+    try:
+        doc_folder = doc.get_main_folder()
+        if not doc_folder:
+            return
+        doc_folder = Path(doc_folder)
+        doc_folder.mkdir(parents=True, exist_ok=True)
+
+        existing_files = doc.get("files") or []
+        source = None
+        if source_file and source_file.exists():
+            source = Path(source_file)
+        else:
+            for f in doc.get_files() or []:
+                if str(f).lower().endswith(".pdf"):
+                    source = Path(f)
+                    break
+        if source is None or not source.exists():
+            return
+
+        base = safe_filename(doc.get("doi") or doc.get("title") or "paper")
+        clean_name = _unique_library_filename(doc_folder, f"{base}-clean.pdf")
+        dirty_name = _unique_library_filename(doc_folder, f"{base}-annotated.pdf")
+
+        clean_path = doc_folder / clean_name
+        dirty_path = doc_folder / dirty_name
+
+        if not clean_path.exists():
+            shutil.copy(source, clean_path)
+        if not dirty_path.exists():
+            shutil.copy(source, dirty_path)
+
+        if clean_name not in existing_files:
+            existing_files.append(clean_name)
+        if dirty_name not in existing_files:
+            existing_files.append(dirty_name)
+
+        doc["files"] = existing_files
+        from papis.api import save_doc
+        save_doc(doc)
+    except Exception:
+        return
+
+def _unique_library_filename(folder: Path, name: str) -> str:
+    path = folder / name
+    if not path.exists():
+        return name
+    base = path.stem
+    suffix = path.suffix
+    counter = 1
+    while True:
+        candidate = folder / f"{base}-{counter}{suffix}"
+        if not candidate.exists():
+            return candidate.name
+        counter += 1
 
 def _openalex_keywords_for_doi(doi: str) -> list[str]:
     """Fetch keywords from OpenAlex for a DOI, return as tag list."""
@@ -445,6 +940,23 @@ def add_paper(
     _set_library_from_param(library)
     res = run_papis_add(str(file_path) if file_path else None, meta)
     if res.get("ok"):
+        if file_path and res.get("paper"):
+            try:
+                _set_library_from_param(library)
+                from papis.database import get_database
+                db = get_database()
+                doc = db.find_by_id(res.get("paper").get("id"))
+                if doc is not None:
+                    _ensure_dual_pdfs(doc, file_path)
+            except Exception:
+                pass
+
+        config = _get_obsidian_config()
+        if config and res.get("paper"):
+            try:
+                _write_note_if_missing(res.get("paper"), library, config)
+            except Exception:
+                pass
         return {"source": "papis", "result": res}
 
     raise HTTPException(status_code=500, detail=f"Failed to add paper: {res}")
@@ -462,15 +974,7 @@ def get_pdf(paper_id: str, variant: str = "clean", library: Optional[str] = None
             raise HTTPException(status_code=404, detail="Paper not found")
 
         files = doc.get_files()  # List[str] (absolute paths)
-
-        pdf_path = next(
-            (
-                Path(f)
-                for f in files
-                if Path(f).suffix.lower() == ".pdf"
-            ),
-            None,
-        )
+        pdf_path = _select_pdf_path(files)
 
         if pdf_path is None or not pdf_path.exists():
             raise HTTPException(status_code=404, detail="PDF not found")
@@ -515,7 +1019,8 @@ def add_pdf_to_paper(paper_id: str, file: UploadFile = File(...), library: Optio
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        addto_run(doc, [str(file_path)], link=False, git=False)
+        # create clean + dirty copies in the document folder
+        _ensure_dual_pdfs(doc, file_path)
 
         # reload document
         doc = db.find_by_id(paper_id)
@@ -618,6 +1123,14 @@ def delete_paper(paper_id: str, library: Optional[str] = None):
         if doc is None:
             raise HTTPException(status_code=404, detail="Paper not found")
 
+        doc_json = _doc_to_json(doc)
+        config = _get_obsidian_config()
+        if config:
+            try:
+                _archive_note_for_doc(doc_json, config)
+            except Exception:
+                pass
+
         # remove folder from filesystem
         delete_document(doc)
         # remove from papis database/cache
@@ -628,6 +1141,77 @@ def delete_paper(paper_id: str, library: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete paper: {e}")
+
+
+@app.post("/api/papers/{paper_id}/open-note")
+def open_note(paper_id: str, library: Optional[str] = None, debug: bool = False):
+    config = _get_obsidian_config()
+    if not config:
+        raise HTTPException(status_code=400, detail="Obsidian vault not configured")
+
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        doc_json = _doc_to_json(doc)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read papis database")
+
+    note_path = _find_note_by_papis_id(Path(config["notes_path"]), doc_json.get("id") or "")
+    if note_path is None:
+        note_path = _write_note_if_missing(doc_json, library, config)
+    if note_path is None:
+        raise HTTPException(status_code=500, detail="Failed to create or locate note")
+
+    vault_path = Path(config["vault_path"])
+    vault_name = config.get("vault_name") or vault_path.name
+    try:
+        rel = note_path.relative_to(vault_path).as_posix()
+    except Exception:
+        rel = note_path.name
+
+    opened, info = _launch_obsidian(str(note_path), debug=debug)
+    if not opened:
+        uri = f"obsidian://open?vault={urllib.parse.quote(vault_name)}&file={urllib.parse.quote(rel)}"
+        try:
+            opened = webbrowser.open(uri)
+            if not opened:
+                raise RuntimeError("Failed to open obsidian URI")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to open Obsidian: {e}")
+
+    return {"ok": True, "note": str(note_path), "debug": info if debug else None}
+
+
+@app.post("/api/obsidian/open-vault")
+def open_obsidian_vault(debug: bool = False):
+    config = _get_obsidian_config()
+    if not config:
+        raise HTTPException(status_code=400, detail="Obsidian vault not configured")
+
+    vault_path = Path(config["vault_path"])
+    if not vault_path.exists():
+        raise HTTPException(status_code=404, detail="Vault path not found")
+
+    _ensure_obsidian_dirs(vault_path)
+
+    # Prefer opening by path (creates/opens vault). Fall back to vault name.
+    opened, info = _launch_obsidian(str(vault_path), debug=debug)
+    if not opened:
+        uri = f"obsidian://open?path={urllib.parse.quote(str(vault_path))}"
+        try:
+            opened = webbrowser.open(uri)
+            if not opened:
+                raise RuntimeError("Failed to open obsidian URI")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to open Obsidian: {e}")
+
+    return {"ok": True, "vault": str(vault_path), "debug": info if debug else None}
 
 
 if __name__ == "__main__":
