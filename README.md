@@ -1,14 +1,3 @@
-ref-project — Papis-backed Web UI (scaffold)
-
-This repository contains an initial scaffold for a web UI built on top of papis.
-
-Structure added by this scaffold:
-
-- `service/` — minimal FastAPI backend that exposes a small JSON API and attempts to call `papis` if available.
-- `web-ui/` — minimal React + Vite + TypeScript frontend scaffold.
-
-See `service/README.md` and `web-ui/README.md` for local run instructions.
-
 ## Quickstart
 
 ```
@@ -21,6 +10,8 @@ pip install -r service/requirements.txt
 source .venv/bin/activate
 uvicorn main:app --reload --port 8000 --app-dir service
 ```
+
+*(or, after venv is set up, launch.json is available to start from vs code)*
 
 ## Architecture
 
