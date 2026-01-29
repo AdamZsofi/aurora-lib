@@ -1,9 +1,11 @@
 ## Quickstart
 
+### Backend (dervice)
 ```
 ./scripts/ensure-venv.sh
 source .venv/bin/activate
-pip install -r service/requirements.txt
+cd service
+pip install -r requirements.txt
 ```
 
 ```
@@ -11,7 +13,15 @@ source .venv/bin/activate
 uvicorn main:app --reload --port 8000 --app-dir service
 ```
 
-*(or, after venv is set up, launch.json is available to start from vs code)*
+## Frontend
+
+```
+cd web-ui
+npm install
+npm run dev
+```
+
+*(or, after everything else is set up, launch.json is available to start from vs code)*
 
 ## Architecture
 
@@ -32,3 +42,12 @@ python-multipart: Handles file uploads (PDFs/BibTeX) in the API.
 ### Data Fetching
 
 Mostly we just fetch crossref. But tags are from OpenAlex, which are fairly experimental, so keep an eye on them (you can remove and add tags manually as well).
+
+### Feature TODOs
+
+- package project: docker?
+- bibtex export
+- filter by tag or other keywords
+- better collaboration (e.g., "read" statuses for several people)
+
+*(also, lots of testing needed)*
