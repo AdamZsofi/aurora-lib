@@ -61,6 +61,14 @@ export default function App() {
   const [setupDone, setSetupDone] = useState(false)
   const [openVaultError, setOpenVaultError] = useState<string | null>(null)
   const [openVaultWorking, setOpenVaultWorking] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<"cache" | "libraries" | "help">("cache")
+  const [cacheUpdating, setCacheUpdating] = useState(false)
+  const [cacheMessage, setCacheMessage] = useState<string | null>(null)
+  const [libsDetails, setLibsDetails] = useState<Array<{ name: string; paths: string[] }>>([])
+  const [libsLoading, setLibsLoading] = useState(false)
+  const [libsError, setLibsError] = useState<string | null>(null)
+  const [copiedPath, setCopiedPath] = useState<string | null>(null)
 
   useEffect(() => {
     fetch("/api/health")
@@ -121,11 +129,12 @@ export default function App() {
       if (e.key === "Escape") {
         if (showAdd) setShowAdd(false)
         else if (showLibs) setShowLibs(false)
+        else if (showSettings) setShowSettings(false)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [showAdd, showLibs])
+  }, [showAdd, showLibs, showSettings])
 
   // close dropdown if clicking outside
   useEffect(() => {
@@ -155,6 +164,17 @@ export default function App() {
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
+
+  useEffect(() => {
+    if (!showSettings) return
+    setLibsLoading(true)
+    setLibsError(null)
+    fetch("/api/libs/details")
+      .then((r) => r.json())
+      .then((j) => setLibsDetails(Array.isArray(j.libraries) ? j.libraries : []))
+      .catch(() => setLibsError("Failed to load libraries"))
+      .finally(() => setLibsLoading(false))
+  }, [showSettings])
 
   const { visibleTabs, hiddenTabs } = useMemo(() => {
     const minTabWidth = 140
@@ -272,6 +292,37 @@ export default function App() {
       }
     } catch (e: any) {
       alert(e.message || "Failed to open Obsidian")
+    }
+  }
+
+  async function updatePapisCache() {
+    setCacheUpdating(true)
+    setCacheMessage(null)
+    try {
+      const url = library
+        ? `/api/cache/update?library=${encodeURIComponent(library)}`
+        : "/api/cache/update"
+      const r = await fetch(url, { method: "POST" })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to update cache")
+      }
+      setCacheMessage("Cache updated.")
+      fetchPapers(library).then(setPapers)
+    } catch (e: any) {
+      setCacheMessage(e.message || "Failed to update cache")
+    } finally {
+      setCacheUpdating(false)
+    }
+  }
+
+  async function copyPath(path: string) {
+    try {
+      await navigator.clipboard.writeText(path)
+      setCopiedPath(path)
+      setTimeout(() => setCopiedPath((p) => (p === path ? null : p)), 1500)
+    } catch {
+      window.prompt("Copy path:", path)
     }
   }
 
@@ -550,6 +601,130 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {showSettings && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
+              <div className="bg-white dark:bg-zinc-900 rounded-lg p-6 shadow-xl w-full max-w-2xl">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold">Settings</h2>
+                  <button
+                    className="text-zinc-400 hover:text-zinc-700"
+                    onClick={() => setShowSettings(false)}
+                    aria-label="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 mb-4">
+                  <button
+                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "cache" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
+                    onClick={() => setSettingsTab("cache")}
+                  >
+                    Cache
+                  </button>
+                  <button
+                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "libraries" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
+                    onClick={() => setSettingsTab("libraries")}
+                  >
+                    Libraries
+                  </button>
+                  <button
+                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "help" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
+                    onClick={() => setSettingsTab("help")}
+                  >
+                    Help
+                  </button>
+                </div>
+
+                {settingsTab === "cache" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                      Update the papis cache so changes on disk are reflected in Aurora.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
+                        onClick={updatePapisCache}
+                        disabled={cacheUpdating}
+                      >
+                        {cacheUpdating ? "Updating..." : "Update cache"}
+                      </button>
+                      {cacheMessage && (
+                        <span className="text-sm text-zinc-500 dark:text-zinc-300">{cacheMessage}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === "libraries" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                      Available Aurora libraries from your papis config. Click a path to copy it.
+                    </p>
+                    {libsLoading && <div className="text-sm text-zinc-500">Loading...</div>}
+                    {libsError && <div className="text-sm text-rose-500">{libsError}</div>}
+                    {!libsLoading && !libsError && libsDetails.length === 0 && (
+                      <div className="text-sm text-zinc-500">No libraries found.</div>
+                    )}
+                    <div className="space-y-3">
+                      {libsDetails.map((lib) => (
+                        <div key={lib.name} className="border border-zinc-200 dark:border-zinc-700 rounded p-3">
+                          <div className="font-semibold text-zinc-800 dark:text-zinc-100">{lib.name}</div>
+                          {lib.paths.length === 0 && (
+                            <div className="text-sm text-zinc-500">No paths configured.</div>
+                          )}
+                          {lib.paths.map((path) => (
+                            <button
+                              key={path}
+                              className="mt-2 w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                              onClick={() => copyPath(path)}
+                              title="Click to copy"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate">{path}</span>
+                                <span className="text-xs text-zinc-400">
+                                  {copiedPath === path ? "Copied" : "Copy"}
+                                </span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === "help" && (
+                  <div className="space-y-3 text-sm text-zinc-600 dark:text-zinc-300">
+                    <p>
+                      Aurora Lib is a lightweight UI for your papis library and notes vault.
+                    </p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>
+                        Use the Library selector in the header to switch between papis libraries.
+                      </li>
+                      <li>
+                        Add papers with the “Add paper” button; tabs keep paper details open while you browse.
+                      </li>
+                      <li>
+                        Tags and reading state are editable in the paper detail view.
+                      </li>
+                      <li>
+                        Use the Notes button to open your Obsidian vault.
+                      </li>
+                      <li>
+                        If you edit files outside Aurora, update the cache from the Cache tab.
+                      </li>
+                    </ul>
+                    <p>
+                      Tip: The Libraries tab shows your configured library paths and lets you copy them with one click.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -558,7 +733,22 @@ export default function App() {
         <span className="text-zinc-400 dark:text-zinc-400">
           Backend health: {health ?? "checking..."}
         </span>
-        <span className="text-zinc-300 dark:text-zinc-600">&copy; {new Date().getFullYear()} solarowl</span>
+        <div className="flex items-center gap-3">
+          <button
+            className="p-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+            onClick={() => {
+              setSettingsTab("cache")
+              setShowSettings(true)
+            }}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor" aria-hidden="true">
+              <path d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.48.48 0 0 0 .12-.6l-1.92-3.32a.48.48 0 0 0-.58-.22l-2.39.96a7.02 7.02 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.93 1h-3.86a.5.5 0 0 0-.49.42l-.36 2.54c-.58.24-1.12.55-1.63.94l-2.39-.96a.48.48 0 0 0-.58.22L1.7 7.48a.48.48 0 0 0 .12.6l2.03 1.58c-.03.31-.05.63-.05.94 0 .31.02.63.05.94l-2.03 1.58a.48.48 0 0 0-.12.6l1.92 3.32c.13.23.39.32.62.22l2.39-.96c.5.39 1.05.7 1.63.94l.36 2.54c.04.24.25.42.49.42h3.86c.24 0 .45-.18.49-.42l.36-2.54c.58-.24 1.12-.55 1.63-.94l2.39.96c.23.1.49.01.62-.22l1.92-3.32a.48.48 0 0 0-.12-.6l-2.03-1.58Zm-7.14 2.56A3.5 3.5 0 1 1 15.5 12a3.5 3.5 0 0 1-3.5 3.5Z" />
+            </svg>
+          </button>
+          <span className="text-zinc-300 dark:text-zinc-600">&copy; {new Date().getFullYear()} solarowl</span>
+        </div>
       </footer>
     </div>
   )

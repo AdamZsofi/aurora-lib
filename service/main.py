@@ -310,6 +310,43 @@ def get_libraries():
         raise HTTPException(status_code=500, detail=f"Failed to get libraries: {e}")
 
 
+@app.get("/api/libs/details")
+def get_library_details():
+    """Return a list of library names and their paths."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        import papis.config as papis_config
+
+        config = papis_config.get_configuration()
+        libs = papis_config.get_libs()
+        details = []
+
+        for lib in libs:
+            paths: list[str] = []
+            if lib in config:
+                section = config[lib]
+                if "dir" in section:
+                    paths = [os.path.expanduser(section["dir"])]
+                elif "dirs" in section:
+                    raw = section["dirs"]
+                    if isinstance(raw, list):
+                        paths = [os.path.expanduser(p) for p in raw]
+                    else:
+                        try:
+                            parsed = eval(raw)
+                            if isinstance(parsed, list):
+                                paths = [os.path.expanduser(p) for p in parsed]
+                        except Exception:
+                            paths = []
+
+            details.append({"name": lib, "paths": paths})
+
+        return {"libraries": details}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get library details: {e}")
+
+
 @app.post("/api/lib")
 def set_library(body: dict):
     """Set the current papis library. Body: {'library': '<name_or_path>'} """
@@ -324,6 +361,27 @@ def set_library(body: dict):
         return {"ok": True, "library": lib}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set library: {e}")
+
+
+@app.post("/api/cache/update")
+def update_cache(library: Optional[str] = None):
+    """Update papis cache for the selected library."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        _set_library_from_param(library)
+        from papis.commands import cache as cache_cmd
+
+        cache_cmd.update_newer(
+            query="",
+            doc_folder=(),
+            _all=True,
+            sort_field=None,
+            sort_reverse=False,
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update papis cache: {e}")
 
 @app.get("/api/tags")
 def get_tags(library: Optional[str] = None):
