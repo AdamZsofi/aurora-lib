@@ -1,0 +1,14 @@
+[Unit]
+Description=Aurora Lib (FastAPI + Web UI)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__AURORA_ROOT__
+EnvironmentFile=%h/.config/aurora-lib/aurora-lib.env
+ExecStart=__AURORA_ROOT__/packaging/bin/aurora-lib
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

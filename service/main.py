@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import FileResponse
 from fastapi import Form, File, UploadFile, Body
 import json
 from pathlib import Path
@@ -13,6 +14,21 @@ import webbrowser
 import subprocess
 
 app = FastAPI()
+
+WEB_UI_DIST = Path(__file__).resolve().parents[1] / "web-ui" / "dist"
+if WEB_UI_DIST.exists():
+    @app.get("/")
+    def serve_root():
+        return FileResponse(WEB_UI_DIST / "index.html")
+
+    @app.get("/{path:path}")
+    def serve_spa(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        file_path = WEB_UI_DIST / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(WEB_UI_DIST / "index.html")
 
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
 UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"

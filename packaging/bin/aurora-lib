@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VENV_DIR="${ROOT_DIR}/.venv"
+PYTHON_BIN="${VENV_DIR}/bin/python"
+
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  PYTHON_BIN="python3"
+fi
+
+HOST="${AURORA_HOST:-127.0.0.1}"
+PORT="${AURORA_PORT:-5173}"
+LOG_LEVEL="${AURORA_LOG_LEVEL:-info}"
+
+exec "${PYTHON_BIN}" -m uvicorn service.main:app --host "${HOST}" --port "${PORT}" --log-level "${LOG_LEVEL}"

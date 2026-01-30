@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__
+**/__pycache__
+**/*.pyc
+.venv
+web-ui/node_modules
+papis/.venv
+papis/**/__pycache__
+service/__pycache__
+packaging
+*.log
