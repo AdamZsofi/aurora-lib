@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { deletePaper } from "../api/papers"
+import { tagColor } from "../utils/tags"
 
 type PaperDetailProps = {
   id: string
@@ -50,15 +51,6 @@ export function PaperDetail({
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
   }, [library])
-
-  function tagColor(tag: string) {
-    let hash = 0
-    for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0
-    const hue = hash % 360
-    const backgroundColor = `hsl(${hue} 80% 85%)`
-    const color = "#0f172a"
-    return { backgroundColor, color }
-  }
 
   async function saveTags(nextTags: string[]) {
     setSavingTags(true)

@@ -6,6 +6,7 @@ import { PapersTable } from "./components/PapersTable"
 import { LibsPanel } from "./components/LibsPanel"
 import { AddPaper } from "./components/AddPaper"
 import { PaperDetail } from "./components/PaperDetail"
+import { tagColor } from "./utils/tags"
 
 export default function App() {
   const defaultTabs = [{ id: "__papers__", title: "📚" }]
@@ -69,6 +70,10 @@ export default function App() {
   const [libsLoading, setLibsLoading] = useState(false)
   const [libsError, setLibsError] = useState<string | null>(null)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
+  const [paperSearch, setPaperSearch] = useState("")
+  const [paperTagFilter, setPaperTagFilter] = useState<string[]>([])
+  const [showFilters, setShowFilters] = useState(false)
+  const [tagSearch, setTagSearch] = useState("")
 
   useEffect(() => {
     fetch("/api/health")
@@ -99,6 +104,10 @@ export default function App() {
     setPaperLoading({})
     setTabs(defaultTabs)
     setActiveTab("__papers__")
+    setPaperSearch("")
+    setPaperTagFilter([])
+    setShowFilters(false)
+    setTagSearch("")
   }, [library])
 
   useEffect(() => {
@@ -209,6 +218,48 @@ export default function App() {
     const hidden = tabs.filter((t) => !nextVisible.some((v) => v.id === t.id))
     return { visibleTabs: nextVisible, hiddenTabs: hidden }
   }, [tabs, activeTab, tabsContainerWidth])
+
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>()
+    papers.forEach((p) => {
+      if (Array.isArray(p.tags)) {
+        p.tags
+          .filter((t) => typeof t === "string")
+          .map((t) => t.trim().toLowerCase())
+          .filter(Boolean)
+          .forEach((t) => tags.add(t))
+      }
+    })
+    return Array.from(tags).sort()
+  }, [papers])
+
+  const visibleTags = useMemo(() => {
+    const q = tagSearch.trim().toLowerCase()
+    if (!q) return availableTags
+    return availableTags.filter((t) => t.includes(q))
+  }, [availableTags, tagSearch])
+
+  const filteredPapers = useMemo(() => {
+    const q = paperSearch.trim().toLowerCase()
+    const terms = q.split(/\s+/).filter(Boolean)
+    const hasTagFilter = paperTagFilter.length > 0
+    return papers.filter((p) => {
+      const title = (p.title || "").toString().toLowerCase()
+      const authors = Array.isArray(p.authors)
+        ? p.authors.join(" ").toLowerCase()
+        : (p.authors || "").toString().toLowerCase()
+      const haystack = `${title} ${authors}`.trim()
+      const matchesQuery =
+        terms.length === 0 || terms.every((t) => haystack.includes(t))
+      if (!matchesQuery) return false
+
+      if (!hasTagFilter) return true
+      const tags = Array.isArray(p.tags)
+        ? p.tags.map((t) => t.toLowerCase())
+        : []
+      return paperTagFilter.some((t) => tags.includes(t))
+    })
+  }, [papers, paperSearch, paperTagFilter])
 
   async function fetchPaper(id: string) {
     setPaperLoading((prev) => ({ ...prev, [id]: true }))
@@ -464,10 +515,94 @@ export default function App() {
               >
                 Add paper
               </button>
+              <button
+                className="px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+                onClick={() => setShowFilters((s) => !s)}
+              >
+                {showFilters ? "Hide filters" : "Show filters"}
+              </button>
             </div>
+            {showFilters && (
+              <div className="mb-4 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium">Search (title or author)</label>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    placeholder="e.g. diffusion models, smith"
+                    value={paperSearch}
+                    onChange={(e) => setPaperSearch(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Filter by tags</label>
+                    {paperTagFilter.length > 0 && (
+                      <button
+                        className="text-sm text-aurora-600 hover:text-aurora-700"
+                        onClick={() => setPaperTagFilter([])}
+                      >
+                        Clear tags
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {paperTagFilter.length === 0 && (
+                      <span className="text-sm text-zinc-500">No tags selected</span>
+                    )}
+                    {paperTagFilter.map((tag) => (
+                      <button
+                        key={tag}
+                        className="px-2 py-1 rounded text-sm border border-transparent"
+                        style={tagColor(tag)}
+                        onClick={() => setPaperTagFilter((prev) => prev.filter((t) => t !== tag))}
+                        title="Remove tag"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    placeholder="Search tags"
+                    value={tagSearch}
+                    onChange={(e) => setTagSearch(e.target.value)}
+                  />
+
+                  <div className="max-h-44 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded">
+                    {visibleTags.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-zinc-500">No tags</div>
+                    )}
+                    {visibleTags.map((tag) => {
+                      const active = paperTagFilter.includes(tag)
+                      return (
+                        <button
+                          key={tag}
+                          className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                            active ? "bg-aurora-50 dark:bg-aurora-900" : ""
+                          }`}
+                          onClick={() =>
+                            setPaperTagFilter((prev) =>
+                              active ? prev.filter((t) => t !== tag) : [...prev, tag]
+                            )
+                          }
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="inline-block w-3 h-3 rounded" style={tagColor(tag)} />
+                            {tag}
+                          </span>
+                          {active && <span className="text-xs text-aurora-600">Selected</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <PapersTable
-                papers={papers}
+                papers={filteredPapers}
                 library={library}
                 onSelect={(id) => {
                   // Open a new tab for this paper if not already open

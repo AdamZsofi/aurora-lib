@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { tagColor } from "../utils/tags"
 
 type BatchItem = {
   id: string
@@ -65,15 +66,6 @@ export function AddPaper({
     const year = meta?.year || meta?.issued || meta?.message?.issued
     const url = meta?.URL || meta?.url || meta?.message?.URL || meta?.message?.url || meta?.link
     return { title, authors, year, url }
-  }
-
-  function tagColor(tag: string) {
-    let hash = 0
-    for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0
-    const hue = hash % 360
-    const bg = `hsl(${hue} 70% 60%)`
-    const text = "#0f172a"
-    return { backgroundColor: bg, color: text }
   }
 
   function addTag(tag: string, setTags: (tags: string[]) => void, current: string[]) {
