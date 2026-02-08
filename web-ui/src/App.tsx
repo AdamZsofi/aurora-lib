@@ -536,10 +536,10 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  <label className="text-sm font-medium">Base directory</label>
+                  <label className="text-sm font-medium">Vault directory</label>
                   <input
                     className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                    placeholder="/path/to/aurora-repo"
+                    placeholder="/path/to/vault"
                     value={setupPath}
                     onChange={(e) => setSetupPath(e.target.value)}
                   />

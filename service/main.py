@@ -16,19 +16,6 @@ import subprocess
 app = FastAPI()
 
 WEB_UI_DIST = Path(__file__).resolve().parents[1] / "web-ui" / "dist"
-if WEB_UI_DIST.exists():
-    @app.get("/")
-    def serve_root():
-        return FileResponse(WEB_UI_DIST / "index.html")
-
-    @app.get("/{path:path}")
-    def serve_spa(path: str):
-        if path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-        file_path = WEB_UI_DIST / path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(WEB_UI_DIST / "index.html")
 
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
 UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
@@ -174,11 +161,11 @@ def setup_aurora(body: dict = Body(...)):
     library_name = body.get("library") if isinstance(body, dict) else None
     vault_name = body.get("vault") if isinstance(body, dict) else None
     library_name = library_name or "aurora"
-    vault_name = vault_name or "obsidian-vault"
 
     library_dir_name = safe_filename(library_name) or "aurora"
-    library_path = base_path / library_dir_name
-    vault_path = base_path / vault_name
+    vault_path = base_path
+    vault_name = base_path.name or (vault_name or "obsidian-vault")
+    library_path = vault_path / library_dir_name
     notes_path = _ensure_obsidian_dirs(vault_path)
 
     library_path.mkdir(parents=True, exist_ok=True)
@@ -197,8 +184,8 @@ def setup_aurora(body: dict = Body(...)):
         general_section = papis_config.get_general_settings_name()
         if not config.has_section(general_section):
             config.add_section(general_section)
-        if "default-library" not in config[general_section]:
-            config[general_section]["default-library"] = library_name
+        # Always set default library to the newly created one
+        config[general_section]["default-library"] = library_name
 
         config_folder = papis_config.get_config_folder()
         os.makedirs(config_folder, exist_ok=True)
@@ -211,7 +198,7 @@ def setup_aurora(body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to configure papis: {e}")
 
     aurora_config = {
-        "repo_path": str(base_path),
+        "repo_path": str(vault_path),
         "library_name": library_name,
         "library_path": str(library_path),
         "vault_name": vault_name,
@@ -544,9 +531,33 @@ def get_note_authors(library: Optional[str] = None):
 def run_papis_add(file_path: Optional[str], metadata: dict) -> dict:
     try:
         from papis.commands.add import run as papis_add_run
+        import papis.config as papis_config
         # papis.commands.add.run signature: run(paths: list[str], data: dict|None = None, ...)
         paths = [str(file_path)] if file_path else []
-        papis_add_run(paths, data=metadata, batch=True, confirm=False, edit=False)
+        base_path = None
+        try:
+            lib_dirs = papis_config.get_lib_dirs()
+            base_path = lib_dirs[0] if lib_dirs else None
+        except Exception:
+            base_path = None
+
+        if not base_path:
+            aurora_config = _load_aurora_config()
+            lib_path = aurora_config.get("library_path") if isinstance(aurora_config, dict) else None
+            if lib_path:
+                base_path = lib_path
+
+        if not base_path:
+            return {"ok": False, "error": "No library directory configured"}
+
+        papis_add_run(
+            paths,
+            data=metadata,
+            batch=True,
+            confirm=False,
+            edit=False,
+            base_path=str(base_path),
+        )
         # attempt to find the created document by DOI or title
         from papis.database import get_database
         db = get_database()
@@ -599,7 +610,7 @@ def _get_obsidian_config() -> Optional[dict]:
         return None
     return data
 
-def _ensure_obsidian_dirs(vault_path: Path) -> tuple[Path, Path]:
+def _ensure_obsidian_dirs(vault_path: Path) -> Path:
     notes_path = vault_path / DEFAULT_NOTES_DIR
     notes_path.mkdir(parents=True, exist_ok=True)
     return notes_path
@@ -1223,6 +1234,22 @@ def open_obsidian_vault(debug: bool = False):
             raise HTTPException(status_code=500, detail=f"Failed to open Obsidian: {e}")
 
     return {"ok": True, "vault": str(vault_path), "debug": info if debug else None}
+
+
+# Register SPA routes last so they don't shadow API endpoints.
+if WEB_UI_DIST.exists():
+    @app.get("/")
+    def serve_root():
+        return FileResponse(WEB_UI_DIST / "index.html")
+
+    @app.get("/{path:path}")
+    def serve_spa(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        file_path = WEB_UI_DIST / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(WEB_UI_DIST / "index.html")
 
 
 if __name__ == "__main__":
