@@ -93,7 +93,7 @@ export function AddPaper({
           .filter(Boolean)
         setSelectedTags((prev) => Array.from(new Set([...prev, ...normalized])))
       }
-      setMetaOpen(true)
+      setMetaOpen(false)
       setStatus("fetched")
     } catch {
       setStatus("error")

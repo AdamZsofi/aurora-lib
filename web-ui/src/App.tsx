@@ -63,7 +63,7 @@ export default function App() {
   const [openVaultError, setOpenVaultError] = useState<string | null>(null)
   const [openVaultWorking, setOpenVaultWorking] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<"cache" | "libraries" | "help">("cache")
+  const [settingsTab, setSettingsTab] = useState<"help" | "libraries" | "cache">("help")
   const [cacheUpdating, setCacheUpdating] = useState(false)
   const [cacheMessage, setCacheMessage] = useState<string | null>(null)
   const [libsDetails, setLibsDetails] = useState<Array<{ name: string; paths: string[] }>>([])
@@ -74,6 +74,9 @@ export default function App() {
   const [paperTagFilter, setPaperTagFilter] = useState<string[]>([])
   const [showFilters, setShowFilters] = useState(false)
   const [tagSearch, setTagSearch] = useState("")
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(() => new Set())
+  const [exportBibStatus, setExportBibStatus] = useState<string | null>(null)
+  const [exportBibMode, setExportBibMode] = useState(false)
 
   useEffect(() => {
     fetch("/api/health")
@@ -108,6 +111,9 @@ export default function App() {
     setPaperTagFilter([])
     setShowFilters(false)
     setTagSearch("")
+    setSelectedPaperIds(new Set())
+    setExportBibStatus(null)
+    setExportBibMode(false)
   }, [library])
 
   useEffect(() => {
@@ -260,6 +266,43 @@ export default function App() {
       return paperTagFilter.some((t) => tags.includes(t))
     })
   }, [papers, paperSearch, paperTagFilter])
+
+  async function exportSelectedBib() {
+    if (selectedPaperIds.size === 0) return
+    setExportBibStatus(null)
+    try {
+      const url = library ? `/api/papers/bibtex?library=${encodeURIComponent(library)}` : "/api/papers/bibtex"
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedPaperIds) }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to export BibTeX")
+      }
+      const j = await r.json()
+      const bibtex = j.bibtex || ""
+      if (!bibtex) throw new Error("Empty BibTeX export")
+
+      try {
+        await navigator.clipboard.writeText(bibtex)
+      } catch {
+        // ignore clipboard failure
+      }
+
+      const blob = new Blob([bibtex], { type: "text/x-bibtex" })
+      const link = document.createElement("a")
+      link.href = URL.createObjectURL(blob)
+      link.download = "aurora-export.bib"
+      link.click()
+      URL.revokeObjectURL(link.href)
+
+      setExportBibStatus(`Exported ${selectedPaperIds.size} entr${selectedPaperIds.size === 1 ? "y" : "ies"}.`)
+    } catch (e: any) {
+      setExportBibStatus(e.message || "Failed to export BibTeX")
+    }
+  }
 
   async function fetchPaper(id: string) {
     setPaperLoading((prev) => ({ ...prev, [id]: true }))
@@ -509,19 +552,64 @@ export default function App() {
           {/* Papers tab */}
           <div className={activeTab === "__papers__" ? "block" : "hidden"}>
             <div className="my-4 flex justify-between items-center">
-              <button
-                className="px-4 py-2 rounded bg-aurora-600 text-white font-semibold shadow hover:bg-aurora-700 transition-colors"
-                onClick={() => setShowAdd(true)}
-              >
-                Add paper
-              </button>
-              <button
-                className="px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                onClick={() => setShowFilters((s) => !s)}
-              >
-                {showFilters ? "Hide filters" : "Show filters"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-4 py-2 rounded bg-aurora-600 text-white font-semibold shadow hover:bg-aurora-700 transition-colors"
+                  onClick={() => setShowAdd(true)}
+                >
+                  Add paper
+                </button>
+                <button
+                  className="px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+                  onClick={() => setShowFilters((s) => !s)}
+                >
+                  {showFilters ? "Hide filters" : "Show filters"}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                {!exportBibMode ? (
+                  <button
+                    className="px-3 py-2 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors"
+                    onClick={() => {
+                      setExportBibMode(true)
+                      setExportBibStatus(null)
+                    }}
+                  >
+                    Export .bib
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="px-3 py-2 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
+                      onClick={exportSelectedBib}
+                      disabled={selectedPaperIds.size === 0}
+                    >
+                      Export selected
+                    </button>
+                    <button
+                      className="px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+                      onClick={() => {
+                        setExportBibMode(false)
+                        setSelectedPaperIds(new Set())
+                        setExportBibStatus(null)
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+            {exportBibMode && (
+              <div className="mb-2 text-sm text-zinc-500 dark:text-zinc-300">
+                Select papers from the list, then export.
+              </div>
+            )}
+            {exportBibStatus && (
+              <div className="mb-2 text-sm text-zinc-600 dark:text-zinc-300">
+                {exportBibStatus}
+              </div>
+            )}
             {showFilters && (
               <div className="mb-4 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
                 <div className="flex flex-col gap-2">
@@ -604,6 +692,34 @@ export default function App() {
               <PapersTable
                 papers={filteredPapers}
                 library={library}
+                selectedIds={selectedPaperIds}
+                showSelection={exportBibMode}
+                onToggleSelect={(id, checked) => {
+                  if (!id) return
+                  setSelectedPaperIds((prev) => {
+                    const next = new Set(prev)
+                    if (checked) next.add(id)
+                    else next.delete(id)
+                    return next
+                  })
+                }}
+                onToggleSelectAll={(checked) => {
+                  setSelectedPaperIds((prev) => {
+                    const next = new Set(prev)
+                    if (checked) {
+                      filteredPapers.forEach((p) => {
+                        const id = p.id || p.ref || ""
+                        if (id) next.add(id)
+                      })
+                    } else {
+                      filteredPapers.forEach((p) => {
+                        const id = p.id || p.ref || ""
+                        if (id) next.delete(id)
+                      })
+                    }
+                    return next
+                  })
+                }}
                 onSelect={(id) => {
                   // Open a new tab for this paper if not already open
                   setTabs(tabs => {
@@ -753,6 +869,12 @@ export default function App() {
 
                 <div className="flex items-center gap-2 mb-4">
                   <button
+                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "help" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
+                    onClick={() => setSettingsTab("help")}
+                  >
+                    Help
+                  </button>
+                  <button
                     className={`px-3 py-1 rounded border text-sm ${settingsTab === "cache" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
                     onClick={() => setSettingsTab("cache")}
                   >
@@ -763,12 +885,6 @@ export default function App() {
                     onClick={() => setSettingsTab("libraries")}
                   >
                     Libraries
-                  </button>
-                  <button
-                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "help" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
-                    onClick={() => setSettingsTab("help")}
-                  >
-                    Help
                   </button>
                 </div>
 
@@ -833,7 +949,7 @@ export default function App() {
                 {settingsTab === "help" && (
                   <div className="space-y-3 text-sm text-zinc-600 dark:text-zinc-300">
                     <p>
-                      Aurora Lib is a lightweight UI for your papis library and notes vault.
+                      Aurora Lib is a lightweight UI and manager for your papis library and obsidian vault.
                     </p>
                     <ul className="list-disc pl-5 space-y-2">
                       <li>
@@ -853,7 +969,7 @@ export default function App() {
                       </li>
                     </ul>
                     <p>
-                      Tip: The Libraries tab shows your configured library paths and lets you copy them with one click.
+                      Tip: You can version control your library if you set up a git repository and choose that to be your library.
                     </p>
                   </div>
                 )}

@@ -1,3 +1,5 @@
+Aurora Lib is a lightweight UI and manager for your papis library and obsidian vault.
+
 ## Quickstart
 
 ### Backend (dervice)

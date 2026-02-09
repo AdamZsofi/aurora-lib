@@ -33,6 +33,17 @@ export function PaperDetail({
   const [readState, setReadState] = useState<string>("unread")
   const [savingState, setSavingState] = useState(false)
   const [stateError, setStateError] = useState<string | null>(null)
+  const [openPdfError, setOpenPdfError] = useState<string | null>(null)
+  const [bibStatus, setBibStatus] = useState<string | null>(null)
+  const [editMetaOpen, setEditMetaOpen] = useState(false)
+  const [metaSaving, setMetaSaving] = useState(false)
+  const [metaError, setMetaError] = useState<string | null>(null)
+  const [metaForm, setMetaForm] = useState({
+    title: "",
+    author: "",
+    year: "",
+    doi: "",
+  })
 
   const pdfExists = Array.isArray(paper?.files)
     ? paper.files.some((f: string) => f.toLowerCase().endsWith(".pdf"))
@@ -42,6 +53,16 @@ export function PaperDetail({
     setTags(Array.isArray(paper?.tags) ? paper.tags : [])
     const nextState = paper?.read_state || paper?.raw?.aurora_read_state || "unread"
     setReadState(nextState)
+    setMetaForm({
+      title: paper?.title || "",
+      author: typeof paper?.authors === "string"
+        ? paper.authors
+        : Array.isArray(paper?.authors)
+          ? paper.authors.join(", ")
+          : paper?.author || "",
+      year: paper?.year?.toString?.() || paper?.raw?.year?.toString?.() || "",
+      doi: paper?.doi || paper?.raw?.doi || "",
+    })
   }, [paper])
 
   useEffect(() => {
@@ -150,13 +171,94 @@ export function PaperDetail({
     }
   }
 
+  async function handleOpenPdf() {
+    setOpenPdfError(null)
+    try {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/pdf/open?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/pdf/open`
+      const r = await fetch(url, { method: "POST" })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to open PDF")
+      }
+    } catch (e: any) {
+      setOpenPdfError(e.message || "Failed to open PDF")
+    }
+  }
+
+  async function handleCopyBib() {
+    setBibStatus(null)
+    try {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/bibtex?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/bibtex`
+      const r = await fetch(url)
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to export BibTeX")
+      }
+      const j = await r.json()
+      const bibtex = j.bibtex || ""
+      if (!bibtex) throw new Error("Empty BibTeX export")
+      await navigator.clipboard.writeText(bibtex)
+      setBibStatus("Copied .bib to clipboard")
+    } catch (e: any) {
+      setBibStatus(e.message || "Failed to copy .bib")
+    }
+  }
+
+  async function handleSaveMeta() {
+    setMetaError(null)
+    setMetaSaving(true)
+    try {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/metadata?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/metadata`
+      const payload = {
+        title: metaForm.title,
+        author: metaForm.author,
+        year: metaForm.year,
+        doi: metaForm.doi,
+      }
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to save metadata")
+      }
+      const j = await r.json().catch(() => ({}))
+      if (j?.paper) {
+        onUpdatePaper?.(j.paper)
+      } else {
+        onRefresh()
+      }
+      setEditMetaOpen(false)
+    } catch (e: any) {
+      setMetaError(e.message || "Failed to save metadata")
+    } finally {
+      setMetaSaving(false)
+    }
+  }
+
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-lg p-6 shadow flex flex-col gap-2 outline-none">
       <div className="flex justify-between items-center mb-2">
         <h2 className="text-xl font-bold">Paper detail</h2>
         <div className="flex gap-2">
+          {pdfExists && (
+            <button
+              className="px-1.5 py-1 rounded bg-aurora-400 text-white font-semibold shadow-sm transition-colors hover:bg-aurora-700"
+              onClick={handleOpenPdf}
+            >
+              Open PDF
+            </button>
+          )}
           <button
-            className="px-3 py-1 rounded bg-aurora-900 text-white hover:bg-aurora-600 transition-colors"
+            className="px-2 py-1 rounded bg-aurora-900 text-white transition-colors hover:bg-aurora-800"
             onClick={() => {
               if (confirm("Delete paper?")) {
                 deletePaper(id, library)
@@ -176,6 +278,7 @@ export function PaperDetail({
       </div>
 
       {loading && <div>Loading...</div>}
+      {openPdfError && <div className="text-sm text-rose-500">{openPdfError}</div>}
 
       {!loading && paper && (
         <div className="flex flex-col lg:flex-row gap-4">
@@ -310,6 +413,59 @@ export function PaperDetail({
             <div className="mt-3">
               <button
                 className="text-sm text-aurora-700 hover:underline"
+                onClick={() => setEditMetaOpen((s) => !s)}
+              >
+                {editMetaOpen ? "Hide metadata editor" : "Edit metadata"}
+              </button>
+              {editMetaOpen && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <label className="text-xs text-zinc-600 dark:text-zinc-300">Title</label>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    value={metaForm.title}
+                    onChange={(e) => setMetaForm((prev) => ({ ...prev, title: e.target.value }))}
+                  />
+                  <label className="text-xs text-zinc-600 dark:text-zinc-300">Authors</label>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    value={metaForm.author}
+                    onChange={(e) => setMetaForm((prev) => ({ ...prev, author: e.target.value }))}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-zinc-600 dark:text-zinc-300">Year</label>
+                      <input
+                        className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                        value={metaForm.year}
+                        onChange={(e) => setMetaForm((prev) => ({ ...prev, year: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-zinc-600 dark:text-zinc-300">DOI</label>
+                      <input
+                        className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                        value={metaForm.doi}
+                        onChange={(e) => setMetaForm((prev) => ({ ...prev, doi: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  {metaError && <div className="text-xs text-rose-500">{metaError}</div>}
+                  <div>
+                    <button
+                      className="px-2 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
+                      onClick={handleSaveMeta}
+                      disabled={metaSaving}
+                    >
+                      {metaSaving ? "Saving..." : "Save metadata"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3">
+              <button
+                className="text-sm text-aurora-700 hover:underline"
                 onClick={() => setShowMeta((s) => !s)}
               >
                 {showMeta ? "Hide metadata" : "Show metadata"}
@@ -319,6 +475,15 @@ export function PaperDetail({
                   {JSON.stringify(paper.raw || paper, null, 2)}
                 </pre>
               )}
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  className="px-2 py-1 rounded bg-aurora-500 text-white font-semibold shadow hover:bg-aurora-800 transition-colors"
+                  onClick={handleCopyBib}
+                >
+                  Copy .bib
+                </button>
+                {bibStatus && <span className="text-xs text-zinc-500">{bibStatus}</span>}
+              </div>
             </div>
           </div>
 

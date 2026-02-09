@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import subprocess
+import sys
 
 app = FastAPI()
 
@@ -877,16 +878,46 @@ def _ensure_dual_pdfs(doc, source_file: Optional[Path]) -> None:
         if not dirty_path.exists():
             shutil.copy(source, dirty_path)
 
-        if clean_name not in existing_files:
-            existing_files.append(clean_name)
-        if dirty_name not in existing_files:
-            existing_files.append(dirty_name)
+        allowed = {clean_name, dirty_name}
 
-        doc["files"] = existing_files
+        # Remove any other PDF copies from the document folder
+        for f in list(existing_files):
+            try:
+                name = Path(f).name
+                if name in allowed:
+                    continue
+                if name.lower().endswith(".pdf"):
+                    extra = doc_folder / name
+                    if extra.exists():
+                        extra.unlink()
+            except Exception:
+                continue
+
+        # If source was an extra PDF in the folder, remove it
+        try:
+            if source.name not in allowed:
+                if source.exists() and source.parent == doc_folder:
+                    source.unlink()
+        except Exception:
+            pass
+
+        doc["files"] = [f for f in existing_files if Path(f).name in allowed]
+        if clean_name not in doc["files"]:
+            doc["files"].append(clean_name)
+        if dirty_name not in doc["files"]:
+            doc["files"].append(dirty_name)
         from papis.api import save_doc
         save_doc(doc)
     except Exception:
         return
+
+def _open_with_default_app(path: Path) -> None:
+    if sys.platform.startswith("darwin"):
+        subprocess.Popen(["open", str(path)])
+    elif sys.platform.startswith("win"):
+        subprocess.Popen(["cmd.exe", "/c", "start", "", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 def _unique_library_filename(folder: Path, name: str) -> str:
     path = folder / name
@@ -1018,6 +1049,132 @@ def get_pdf(paper_id: str, variant: str = "clean", library: Optional[str] = None
             status_code=500,
             detail="Failed to read papis database",
         ) from e
+
+
+@app.post("/api/papers/{paper_id}/pdf/open")
+def open_pdf(paper_id: str, library: Optional[str] = None):
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        files = doc.get_files()
+        pdf_path = _select_pdf_path(files)
+        if pdf_path is None or not pdf_path.exists():
+            raise HTTPException(status_code=404, detail="PDF not found")
+
+        _open_with_default_app(pdf_path)
+        return {"ok": True, "path": str(pdf_path)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to open PDF: {e}")
+
+
+def _export_bibtex_for_docs(docs) -> str:
+    from papis.exporters.bibtex import exporter
+    cleaned = []
+    for doc in docs:
+        try:
+            copy = doc.copy() if hasattr(doc, "copy") else doc
+            if isinstance(copy, dict):
+                copy.pop("abstract", None)
+                copy.pop("abstract_latex", None)
+            cleaned.append(copy)
+        except Exception:
+            cleaned.append(doc)
+    return exporter(cleaned)
+
+
+@app.get("/api/papers/{paper_id}/bibtex")
+def get_paper_bibtex(paper_id: str, library: Optional[str] = None):
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        bibtex = _export_bibtex_for_docs([doc])
+        if not bibtex:
+            raise HTTPException(status_code=500, detail="Failed to export BibTeX")
+        return {"bibtex": bibtex}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export BibTeX: {e}")
+
+
+@app.post("/api/papers/bibtex")
+def export_bibtex(body: dict = Body(...), library: Optional[str] = None):
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    ids = body.get("ids") if isinstance(body, dict) else None
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="Missing 'ids'")
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+
+        db = get_database()
+        docs = [db.find_by_id(str(pid)) for pid in ids]
+        docs = [d for d in docs if d is not None]
+        if not docs:
+            raise HTTPException(status_code=404, detail="No papers found")
+
+        bibtex = _export_bibtex_for_docs(docs)
+        if not bibtex:
+            raise HTTPException(status_code=500, detail="Failed to export BibTeX")
+        return {"bibtex": bibtex}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export BibTeX: {e}")
+
+
+@app.post("/api/papers/{paper_id}/metadata")
+def update_metadata(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid body")
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+        from papis.api import save_doc
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        for key in ["title", "author", "year", "doi"]:
+            if key in body:
+                value = body.get(key)
+                if value is None or (isinstance(value, str) and value.strip() == ""):
+                    if key in doc:
+                        del doc[key]
+                    if key == "author" and "author_list" in doc:
+                        del doc["author_list"]
+                else:
+                    doc[key] = value
+                    if key == "author" and "author_list" in doc:
+                        del doc["author_list"]
+
+        save_doc(doc)
+        return {"ok": True, "paper": _doc_to_json(doc)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update metadata: {e}")
 
 @app.post("/api/papers/{paper_id}/pdf")
 def add_pdf_to_paper(paper_id: str, file: UploadFile = File(...), library: Optional[str] = None):
