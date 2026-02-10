@@ -4,6 +4,8 @@ from fastapi import Form, File, UploadFile, Body
 import json
 from pathlib import Path
 from typing import Optional
+import uuid
+import hashlib
 import shutil
 import tempfile
 import os
@@ -21,6 +23,8 @@ WEB_UI_DIST = Path(__file__).resolve().parents[1] / "web-ui" / "dist"
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
 UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
 AURORA_CONFIG_FILE = Path(__file__).parent / ".aurora_config.json"
+VAULT_CONFIG_FILENAME = ".aurora-lib.json"
+AURORA_PAPIS_CONFIG_DIR = Path(__file__).parent / ".papis"
 DEFAULT_NOTES_DIR = "paper-notes"
 NOTE_BLOCK_BEGIN = "%% AURORA:BEGIN %%"
 NOTE_BLOCK_END = "%% AURORA:END %%"
@@ -39,14 +43,111 @@ READ_STATE_EMOJI = {
     "read_deep": "📚",
 }
 
-def _set_library_from_param(library: Optional[str]) -> None:
-    if not library:
+# Aurora-scoped papis config root (override any system-wide papis config)
+os.environ["PAPIS_CONFIG_DIR"] = str(AURORA_PAPIS_CONFIG_DIR)
+
+
+@app.on_event("startup")
+def _aurora_startup() -> None:
+    if not papis_importable():
         return
+    try:
+        import papis.config as papis_config
+
+        AURORA_PAPIS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        papis_config.reset_configuration()
+    except Exception:
+        pass
+
+def _bootstrap_from_env() -> None:
+    vault_path_env = os.environ.get("AURORA_DEFAULT_VAULT")
+    if not vault_path_env:
+        return
+    vault_path = Path(vault_path_env).expanduser().resolve()
+    if not vault_path.exists():
+        return
+
+    data = _load_aurora_config()
+    if data.get("vault_path"):
+        return
+
+    vault_cfg = _load_vault_config(vault_path) or {}
+    library_uuid = vault_cfg.get("library_uuid")
+    if not library_uuid:
+        library_uuid = str(uuid.uuid4())
+        vault_cfg["library_uuid"] = library_uuid
+        try:
+            _save_vault_config(vault_path, vault_cfg)
+        except Exception:
+            pass
+
+    base_library_name = vault_cfg.get("library_name") or os.environ.get("AURORA_DEFAULT_LIBRARY") or "paper-lib"
+    library_name = _with_library_hash(base_library_name, library_uuid)
+    library_dir_name = vault_cfg.get("library_dir") or safe_filename(library_name) or "paper-lib"
+    library_path = vault_path / library_dir_name
+    notes_path = _ensure_obsidian_dirs(vault_path)
+    library_path.mkdir(parents=True, exist_ok=True)
+
+    if papis_importable():
+        try:
+            import papis.config as papis_config
+
+            config = papis_config.get_configuration()
+            if not config.has_section(library_name):
+                config.add_section(library_name)
+            config[library_name]["dir"] = str(library_path)
+
+            general_section = papis_config.get_general_settings_name()
+            if not config.has_section(general_section):
+                config.add_section(general_section)
+            config[general_section]["default-library"] = library_name
+
+            config_folder = papis_config.get_config_folder()
+            os.makedirs(config_folder, exist_ok=True)
+            config_file = papis_config.get_config_file()
+            with open(config_file, "w", encoding="utf-8") as configfile:
+                config.write(configfile)
+
+            papis_config.set_lib_from_name(library_name)
+        except Exception:
+            pass
+
+    aurora_config = {
+        "repo_path": str(vault_path),
+        "library_name": library_name,
+        "library_path": str(library_path),
+        "vault_name": vault_path.name,
+        "vault_path": str(vault_path),
+        "notes_path": str(notes_path),
+        "library_uuid": library_uuid,
+    }
+    try:
+        _save_aurora_config(aurora_config)
+        _save_vault_config(vault_path, {
+            "library_name": base_library_name,
+            "library_dir": library_dir_name,
+            "library_uuid": library_uuid,
+        })
+    except Exception:
+        pass
+
+def _resolve_library_name(library: Optional[str]) -> str:
+    if library:
+        return library
+    data = _load_aurora_config()
+    name = data.get("library_name") if isinstance(data, dict) else None
+    if name:
+        return name
+    raise HTTPException(status_code=400, detail="Library not configured. Please set up or import a library.")
+
+
+def _set_library_from_param(library: Optional[str]) -> None:
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    libname = _resolve_library_name(library)
     try:
         from papis.api import set_lib_from_name
-        set_lib_from_name(library)
+        set_lib_from_name(libname)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to select library: {e}")
 
@@ -118,14 +219,35 @@ def _doc_to_json(doc) -> dict:
 def get_papis_list(library: Optional[str] = None):
     # Prefer importing papis as a library; fall back to subprocess if needed
     if papis_importable():
-        try:
-            _set_library_from_param(library)
-            from papis.database import get_database
-            db = get_database()
-            docs = db.get_all_documents()
-            return [ _doc_to_json(d) for d in docs ]
-        except Exception:
-            return None
+        _set_library_from_param(library)
+        from papis.database import get_database
+        import papis.config as papis_config
+
+        aurora_cfg = _load_aurora_config()
+        library_path = None
+        if isinstance(aurora_cfg, dict):
+            library_path = aurora_cfg.get("library_path")
+
+        if library_path:
+            try:
+                info_name = papis_config.getstring("info-name") or "info.yaml"
+                for _root, _dirs, files in os.walk(library_path):
+                    if info_name in files:
+                        break
+                else:
+                    try:
+                        from papis.api import clear_lib_cache
+
+                        clear_lib_cache()
+                    except Exception:
+                        pass
+                    return []
+            except Exception:
+                pass
+
+        db = get_database()
+        docs = db.get_all_documents()
+        return [_doc_to_json(d) for d in docs]
 
     # fallback: try CLI
     try:
@@ -146,8 +268,6 @@ def papers(library: Optional[str] = None):
     data = get_papis_list(library)
     if data is not None:
         return {"source": "papis", "papers": data}
-    if SAMPLE_FILE.exists():
-        return {"source": "sample", "papers": json.loads(SAMPLE_FILE.read_text())}
     return {"source": "empty", "papers": []}
 
 
@@ -159,13 +279,35 @@ def setup_aurora(body: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Missing 'path'")
 
     base_path = Path(base).expanduser().resolve()
+    mode = body.get("mode") if isinstance(body, dict) else None
     library_name = body.get("library") if isinstance(body, dict) else None
     vault_name = body.get("vault") if isinstance(body, dict) else None
     library_name = library_name or "aurora"
 
-    library_dir_name = safe_filename(library_name) or "aurora"
     vault_path = base_path
     vault_name = base_path.name or (vault_name or "obsidian-vault")
+
+    if mode == "import":
+        vault_cfg = _load_vault_config(vault_path)
+        if not vault_cfg:
+            raise HTTPException(status_code=404, detail="No Aurora vault config found to import")
+        library_uuid = vault_cfg.get("library_uuid")
+        if not library_uuid:
+            raise HTTPException(status_code=400, detail="Vault config missing library UUID")
+        aurora_cfg = _load_aurora_config()
+        if isinstance(aurora_cfg, dict):
+            existing_uuid = aurora_cfg.get("library_uuid")
+            existing_path = aurora_cfg.get("vault_path")
+            if existing_uuid and existing_uuid == library_uuid:
+                if existing_path and Path(existing_path).resolve() != vault_path:
+                    raise HTTPException(status_code=409, detail="This library is already configured in another location")
+        library_name = vault_cfg.get("library_name") or library_name
+        library_dir_name = vault_cfg.get("library_dir") or safe_filename(library_name) or "aurora"
+    else:
+        library_dir_name = safe_filename(library_name) or "aurora"
+        library_uuid = str(uuid.uuid4())
+
+    library_name = _with_library_hash(library_name, library_uuid)
     library_path = vault_path / library_dir_name
     notes_path = _ensure_obsidian_dirs(vault_path)
 
@@ -195,6 +337,12 @@ def setup_aurora(body: dict = Body(...)):
             config.write(configfile)
 
         papis_config.set_lib_from_name(library_name)
+        try:
+            from papis.api import clear_lib_cache
+
+            clear_lib_cache()
+        except Exception:
+            pass
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to configure papis: {e}")
 
@@ -205,9 +353,15 @@ def setup_aurora(body: dict = Body(...)):
         "vault_name": vault_name,
         "vault_path": str(vault_path),
         "notes_path": str(notes_path),
+        "library_uuid": library_uuid,
     }
     try:
         _save_aurora_config(aurora_config)
+        _save_vault_config(vault_path, {
+            "library_name": _strip_library_hash(library_name),
+            "library_dir": library_dir_name,
+            "library_uuid": library_uuid,
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to persist aurora config: {e}")
 
@@ -294,11 +448,19 @@ def get_current_library():
     if not papis_importable():
         raise HTTPException(status_code=500, detail="papis library not available in this environment")
     try:
-        from papis.api import get_lib_name
-        name = get_lib_name()
+        data = _load_aurora_config()
+        name = data.get("library_name") if isinstance(data, dict) else None
         return {"library": name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get current library: {e}")
+
+
+@app.get("/api/aurora/config")
+def get_aurora_config():
+    data = _load_aurora_config()
+    if not data:
+        return {"configured": False}
+    return {"configured": True, "config": data}
 
 
 @app.get("/api/libs")
@@ -322,33 +484,35 @@ def get_library_details():
     try:
         import papis.config as papis_config
 
-        config = papis_config.get_configuration()
-        libs = papis_config.get_libs()
-        details = []
+        aurora_cfg = _load_aurora_config()
+        aurora_name = aurora_cfg.get("library_name") if isinstance(aurora_cfg, dict) else None
+        aurora_path = aurora_cfg.get("library_path") if isinstance(aurora_cfg, dict) else None
+        if aurora_name and aurora_path:
+            return {"libraries": [{"name": aurora_name, "paths": [aurora_path]}]}
 
-        for lib in libs:
-            paths: list[str] = []
-            if lib in config:
-                section = config[lib]
-                if "dir" in section:
-                    paths = [os.path.expanduser(section["dir"])]
-                elif "dirs" in section:
-                    raw = section["dirs"]
-                    if isinstance(raw, list):
-                        paths = [os.path.expanduser(p) for p in raw]
-                    else:
-                        try:
-                            parsed = eval(raw)
-                            if isinstance(parsed, list):
-                                paths = [os.path.expanduser(p) for p in parsed]
-                        except Exception:
-                            paths = []
-
-            details.append({"name": lib, "paths": paths})
-
-        return {"libraries": details}
+        return {"libraries": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get library details: {e}")
+
+
+@app.get("/api/papis/config")
+def get_papis_config():
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        import papis.config as papis_config
+
+        aurora_cfg = _load_aurora_config()
+        aurora_name = aurora_cfg.get("library_name") if isinstance(aurora_cfg, dict) else None
+        aurora_path = aurora_cfg.get("library_path") if isinstance(aurora_cfg, dict) else None
+        return {
+            "config_dir": papis_config.get_config_folder(),
+            "config_file": papis_config.get_config_file(),
+            "library_name": aurora_name,
+            "library_path": aurora_path,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read papis config: {e}")
 
 
 @app.post("/api/lib")
@@ -376,7 +540,8 @@ def update_cache(library: Optional[str] = None):
         _set_library_from_param(library)
         from papis.commands import cache as cache_cmd
 
-        cache_cmd.update_newer(
+        update_fn = getattr(cache_cmd.update_newer, "callback", cache_cmd.update_newer)
+        update_fn(
             query="",
             doc_folder=(),
             _all=True,
@@ -584,6 +749,22 @@ def safe_filename(value: str) -> str:
     value = FILENAME_SAFE.sub("_", value)
     return value[:255]  # filesystem-safe length
 
+def _library_hash(library_uuid: str) -> str:
+    digest = hashlib.sha1(library_uuid.encode("utf-8")).hexdigest()
+    return digest[:8]
+
+def _with_library_hash(name: str, library_uuid: str) -> str:
+    base = (name or "").strip()
+    suffix = _library_hash(library_uuid)
+    if base.endswith(f"-{suffix}"):
+        return base
+    return f"{base}-{suffix}" if base else suffix
+
+def _strip_library_hash(name: str) -> str:
+    base = (name or "").strip()
+    m = re.match(r"^(.*?)-[0-9a-f]{8}$", base)
+    return m.group(1) if m else base
+
 def _note_slug(title: str) -> str:
     value = (title or "").strip().lower()
     value = re.sub(r"\s+", "-", value)
@@ -603,6 +784,26 @@ def _load_aurora_config() -> dict:
 def _save_aurora_config(data: dict) -> None:
     AURORA_CONFIG_FILE.write_text(json.dumps(data, indent=2))
 
+
+def _vault_config_path(vault_path: Path) -> Path:
+    return vault_path / VAULT_CONFIG_FILENAME
+
+
+def _load_vault_config(vault_path: Path) -> dict | None:
+    try:
+        path = _vault_config_path(vault_path)
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _save_vault_config(vault_path: Path, data: dict) -> None:
+    path = _vault_config_path(vault_path)
+    path.write_text(json.dumps(data, indent=2))
+
 def _get_obsidian_config() -> Optional[dict]:
     data = _load_aurora_config()
     vault_path = data.get("vault_path")
@@ -610,6 +811,9 @@ def _get_obsidian_config() -> Optional[dict]:
     if not vault_path or not notes_path:
         return None
     return data
+
+
+_bootstrap_from_env()
 
 def _ensure_obsidian_dirs(vault_path: Path) -> Path:
     notes_path = vault_path / DEFAULT_NOTES_DIR

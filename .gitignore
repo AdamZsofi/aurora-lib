@@ -5,6 +5,9 @@ node_modules/
 dist/
 web-ui/node_modules/
 service/.venv
+service/.aurora_config.json
+service/.ui_state.json
+service/.papis/
 __pycache__/
 *.pyc
 context-info/*

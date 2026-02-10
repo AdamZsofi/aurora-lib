@@ -15,8 +15,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY service/requirements.txt /app/service/requirements.txt
 COPY papis /app/papis
+WORKDIR /app/service
 RUN pip install --upgrade pip \
     && pip install -r /app/service/requirements.txt
+
+WORKDIR /app
 
 COPY service /app/service
 COPY web-ui/dist /app/web-ui/dist

@@ -33,10 +33,15 @@ You can change host/port/log level:
 
 Build and run a single container that serves the UI on localhost:5173.
 
-Start:
+Start (requires a vault path on the host):
 
-./packaging/docker/start.sh
+./packaging/docker/start.sh /absolute/path/to/vault
 
 Stop:
 
 ./packaging/docker/stop.sh
+
+Notes:
+
+- The mounted path is treated as the Obsidian vault (or to-be-created vault).
+- Only one vault can be active when using the Docker setup (single mount at /data).

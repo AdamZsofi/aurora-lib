@@ -63,12 +63,15 @@ export default function App() {
   const [openVaultError, setOpenVaultError] = useState<string | null>(null)
   const [openVaultWorking, setOpenVaultWorking] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<"help" | "libraries" | "cache">("help")
+  const [settingsTab, setSettingsTab] = useState<"help" | "libraries" | "papis">("help")
   const [cacheUpdating, setCacheUpdating] = useState(false)
   const [cacheMessage, setCacheMessage] = useState<string | null>(null)
   const [libsDetails, setLibsDetails] = useState<Array<{ name: string; paths: string[] }>>([])
   const [libsLoading, setLibsLoading] = useState(false)
   const [libsError, setLibsError] = useState<string | null>(null)
+  const [papisConfig, setPapisConfig] = useState<{ config_dir?: string; config_file?: string; library_name?: string; library_path?: string } | null>(null)
+  const [papisConfigLoading, setPapisConfigLoading] = useState(false)
+  const [papisConfigError, setPapisConfigError] = useState<string | null>(null)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [paperSearch, setPaperSearch] = useState("")
   const [paperTagFilter, setPaperTagFilter] = useState<string[]>([])
@@ -77,6 +80,8 @@ export default function App() {
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(() => new Set())
   const [exportBibStatus, setExportBibStatus] = useState<string | null>(null)
   const [exportBibMode, setExportBibMode] = useState(false)
+  const [setupMode, setSetupMode] = useState<"create" | "import">("create")
+  const [needsSetup, setNeedsSetup] = useState(false)
 
   useEffect(() => {
     fetch("/api/health")
@@ -84,12 +89,21 @@ export default function App() {
       .then((j) => setHealth(j.status))
       .catch(() => setHealth("unavailable"))
 
-    if (!library) {
-      fetch("/api/lib")
-        .then((r) => r.json())
-        .then((j) => setLibrary(j.library))
-        .catch(() => setLibrary(null))
-    }
+    fetch("/api/aurora/config")
+      .then((r) => r.json())
+      .then((j) => {
+        if (j?.configured && j?.config?.library_name) {
+          setLibrary(j.config.library_name)
+          setNeedsSetup(false)
+        } else {
+          setLibrary(null)
+          setNeedsSetup(true)
+        }
+      })
+      .catch(() => {
+        setLibrary(null)
+        setNeedsSetup(true)
+      })
   }, [])
 
   useEffect(() => {
@@ -102,7 +116,11 @@ export default function App() {
   }, [library])
 
   useEffect(() => {
-    fetchPapers(library).then(setPapers)
+    if (library) {
+      fetchPapers(library).then(setPapers)
+    } else {
+      setPapers([])
+    }
     setPaperCache({})
     setPaperLoading({})
     setTabs(defaultTabs)
@@ -114,6 +132,7 @@ export default function App() {
     setSelectedPaperIds(new Set())
     setExportBibStatus(null)
     setExportBibMode(false)
+    setNeedsSetup(!library)
   }, [library])
 
   useEffect(() => {
@@ -189,6 +208,14 @@ export default function App() {
       .then((j) => setLibsDetails(Array.isArray(j.libraries) ? j.libraries : []))
       .catch(() => setLibsError("Failed to load libraries"))
       .finally(() => setLibsLoading(false))
+
+    setPapisConfigLoading(true)
+    setPapisConfigError(null)
+    fetch("/api/papis/config")
+      .then((r) => r.json())
+      .then((j) => setPapisConfig(j))
+      .catch(() => setPapisConfigError("Failed to load papis config"))
+      .finally(() => setPapisConfigLoading(false))
   }, [showSettings])
 
   const { visibleTabs, hiddenTabs } = useMemo(() => {
@@ -345,6 +372,7 @@ export default function App() {
           path: setupPath.trim(),
           library: setupLibraryName.trim() || "aurora",
           vault: setupVaultName.trim() || "obsidian-vault",
+          mode: setupMode,
         }),
       })
       if (!r.ok) {
@@ -354,6 +382,7 @@ export default function App() {
       const j = await r.json()
       if (j?.library) setLibrary(j.library)
       setSetupDone(true)
+      setNeedsSetup(false)
     } catch (e: any) {
       setSetupError(e.message || "Failed to set up library")
     } finally {
@@ -473,6 +502,27 @@ export default function App() {
 
       {/* Tabs */}
       <div className="flex flex-col flex-1">
+        {needsSetup && !showSetup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="bg-white dark:bg-zinc-900 rounded-lg p-6 shadow-xl w-full max-w-md text-center">
+              <h2 className="text-xl font-bold mb-2">Set up or import Aurora</h2>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-4">
+                No library is configured yet. Set up a new vault or import an existing one.
+              </p>
+              <button
+                className="px-4 py-2 rounded bg-aurora-600 text-white font-semibold shadow hover:bg-aurora-700 transition-colors"
+                onClick={() => {
+                  setSetupError(null)
+                  setSetupDone(false)
+                  setOpenVaultError(null)
+                  setShowSetup(true)
+                }}
+              >
+                Set up / Import
+              </button>
+            </div>
+          </div>
+        )}
         <div
           className="flex items-end border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 px-6 pt-2 overflow-hidden"
           ref={tabsContainerRef}
@@ -776,7 +826,7 @@ export default function App() {
             <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
               <div className="bg-white dark:bg-zinc-900 rounded-lg p-6 shadow-xl w-full max-w-xl">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold">Set up new Aurora lib</h2>
+                  <h2 className="text-xl font-bold">Set up or import Aurora lib</h2>
                   <button
                     className="text-zinc-400 hover:text-zinc-700"
                     onClick={() => setShowSetup(false)}
@@ -787,6 +837,29 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      className={`px-3 py-1 rounded border ${
+                        setupMode === "create"
+                          ? "bg-aurora-100 border-aurora-300 text-aurora-800"
+                          : "bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200"
+                      }`}
+                      onClick={() => setSetupMode("create")}
+                    >
+                      Create
+                    </button>
+                    <button
+                      className={`px-3 py-1 rounded border ${
+                        setupMode === "import"
+                          ? "bg-aurora-100 border-aurora-300 text-aurora-800"
+                          : "bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200"
+                      }`}
+                      onClick={() => setSetupMode("import")}
+                    >
+                      Import
+                    </button>
+                  </div>
+
                   <label className="text-sm font-medium">Vault directory</label>
                   <input
                     className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
@@ -795,19 +868,16 @@ export default function App() {
                     onChange={(e) => setSetupPath(e.target.value)}
                   />
 
-                  <label className="text-sm font-medium">Library name</label>
-                  <input
-                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                    value={setupLibraryName}
-                    onChange={(e) => setSetupLibraryName(e.target.value)}
-                  />
-
-                  <label className="text-sm font-medium">Obsidian vault folder</label>
-                  <input
-                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                    value={setupVaultName}
-                    onChange={(e) => setSetupVaultName(e.target.value)}
-                  />
+                  {setupMode === "create" && (
+                    <>
+                      <label className="text-sm font-medium">Library name</label>
+                      <input
+                        className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                        value={setupLibraryName}
+                        onChange={(e) => setSetupLibraryName(e.target.value)}
+                      />
+                    </>
+                  )}
 
                   {setupError && (
                     <div className="text-sm text-rose-500">{setupError}</div>
@@ -815,7 +885,9 @@ export default function App() {
 
                   {setupDone && (
                     <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 text-emerald-900 p-3 text-sm">
-                      Setup complete. Obidian sets up the vault when it is opened the first time. (Use button below.)
+                      {setupMode === "import"
+                        ? "Import complete."
+                        : "Setup complete. Obsidian sets up the vault when it is opened the first time. (Use button below.)"}
                     </div>
                   )}
                   {openVaultError && (
@@ -875,10 +947,10 @@ export default function App() {
                     Help
                   </button>
                   <button
-                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "cache" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
-                    onClick={() => setSettingsTab("cache")}
+                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "papis" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
+                    onClick={() => setSettingsTab("papis")}
                   >
-                    Cache
+                    Papis
                   </button>
                   <button
                     className={`px-3 py-1 rounded border text-sm ${settingsTab === "libraries" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
@@ -888,7 +960,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {settingsTab === "cache" && (
+                {settingsTab === "papis" && (
                   <div className="space-y-3">
                     <p className="text-sm text-zinc-600 dark:text-zinc-300">
                       Update the papis cache so changes on disk are reflected in Aurora.
@@ -903,6 +975,63 @@ export default function App() {
                       </button>
                       {cacheMessage && (
                         <span className="text-sm text-zinc-500 dark:text-zinc-300">{cacheMessage}</span>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                        Aurora uses a local papis config. Click a path to copy it.
+                      </p>
+                      {papisConfigLoading && (
+                        <div className="text-sm text-zinc-500">Loading...</div>
+                      )}
+                      {papisConfigError && (
+                        <div className="text-sm text-rose-500">{papisConfigError}</div>
+                      )}
+                      {!papisConfigLoading && !papisConfigError && papisConfig && (
+                        <div className="space-y-2">
+                          {papisConfig.config_dir && (
+                            <button
+                              className="w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                              onClick={() => copyPath(papisConfig.config_dir || "")}
+                              title="Click to copy"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate">{papisConfig.config_dir}</span>
+                                <span className="text-xs text-zinc-400">
+                                  {copiedPath === papisConfig.config_dir ? "Copied" : "Copy"}
+                                </span>
+                              </div>
+                            </button>
+                          )}
+                          {papisConfig.config_file && (
+                            <button
+                              className="w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                              onClick={() => copyPath(papisConfig.config_file || "")}
+                              title="Click to copy"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate">{papisConfig.config_file}</span>
+                                <span className="text-xs text-zinc-400">
+                                  {copiedPath === papisConfig.config_file ? "Copied" : "Copy"}
+                                </span>
+                              </div>
+                            </button>
+                          )}
+                          {papisConfig.library_path && (
+                            <button
+                              className="w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                              onClick={() => copyPath(papisConfig.library_path || "")}
+                              title="Click to copy"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate">{papisConfig.library_path}</span>
+                                <span className="text-xs text-zinc-400">
+                                  {copiedPath === papisConfig.library_path ? "Copied" : "Copy"}
+                                </span>
+                              </div>
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -965,7 +1094,7 @@ export default function App() {
                         Use the Notes button to open your Obsidian vault.
                       </li>
                       <li>
-                        If you edit files outside Aurora, update the cache from the Cache tab.
+                        If you edit files outside Aurora, update the cache from the Papis tab.
                       </li>
                     </ul>
                     <p>
@@ -988,7 +1117,7 @@ export default function App() {
           <button
             className="p-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
             onClick={() => {
-              setSettingsTab("cache")
+              setSettingsTab("papis")
               setShowSettings(true)
             }}
             title="Settings"
