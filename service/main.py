@@ -46,6 +46,22 @@ READ_STATE_EMOJI = {
 # Aurora-scoped papis config root (override any system-wide papis config)
 os.environ["PAPIS_CONFIG_DIR"] = str(AURORA_PAPIS_CONFIG_DIR)
 
+def _is_single_library_mode() -> bool:
+    return os.environ.get("AURORA_SINGLE_LIBRARY", "").lower() in {"1", "true", "yes", "on"}
+
+def _single_library_vault_path() -> Optional[Path]:
+    if not _is_single_library_mode():
+        return None
+    vault = os.environ.get("AURORA_DEFAULT_VAULT")
+    if not vault:
+        return None
+    return Path(vault).expanduser().resolve()
+
+def _enforce_single_library_path(vault_path: Path) -> None:
+    expected = _single_library_vault_path()
+    if expected and vault_path.resolve() != expected:
+        raise HTTPException(status_code=400, detail="This instance is locked to a single vault path")
+
 
 @app.on_event("startup")
 def _aurora_startup() -> None:
@@ -279,6 +295,7 @@ def setup_aurora(body: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Missing 'path'")
 
     base_path = Path(base).expanduser().resolve()
+    _enforce_single_library_path(base_path)
     mode = body.get("mode") if isinstance(body, dict) else None
     library_name = body.get("library") if isinstance(body, dict) else None
     vault_name = body.get("vault") if isinstance(body, dict) else None
@@ -458,9 +475,20 @@ def get_current_library():
 @app.get("/api/aurora/config")
 def get_aurora_config():
     data = _load_aurora_config()
+    single_mode = _is_single_library_mode()
+    single_path = _single_library_vault_path()
     if not data:
-        return {"configured": False}
-    return {"configured": True, "config": data}
+        return {
+            "configured": False,
+            "single_library": single_mode,
+            "default_vault": str(single_path) if single_path else None,
+        }
+    return {
+        "configured": True,
+        "config": data,
+        "single_library": single_mode,
+        "default_vault": str(single_path) if single_path else None,
+    }
 
 
 @app.get("/api/libs")
@@ -813,8 +841,6 @@ def _get_obsidian_config() -> Optional[dict]:
     return data
 
 
-_bootstrap_from_env()
-
 def _ensure_obsidian_dirs(vault_path: Path) -> Path:
     notes_path = vault_path / DEFAULT_NOTES_DIR
     notes_path.mkdir(parents=True, exist_ok=True)
@@ -1159,6 +1185,8 @@ def _openalex_keywords_for_doi(doi: str) -> list[str]:
         return list(dict.fromkeys(tags))
     except Exception:
         return []
+
+_bootstrap_from_env()
 
 @app.post("/api/papers")
 def add_paper(

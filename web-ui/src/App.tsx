@@ -69,6 +69,7 @@ export default function App() {
   const [libsDetails, setLibsDetails] = useState<Array<{ name: string; paths: string[] }>>([])
   const [libsLoading, setLibsLoading] = useState(false)
   const [libsError, setLibsError] = useState<string | null>(null)
+  const [libraryOptions, setLibraryOptions] = useState<string[]>([])
   const [papisConfig, setPapisConfig] = useState<{ config_dir?: string; config_file?: string; library_name?: string; library_path?: string } | null>(null)
   const [papisConfigLoading, setPapisConfigLoading] = useState(false)
   const [papisConfigError, setPapisConfigError] = useState<string | null>(null)
@@ -82,6 +83,8 @@ export default function App() {
   const [exportBibMode, setExportBibMode] = useState(false)
   const [setupMode, setSetupMode] = useState<"create" | "import">("create")
   const [needsSetup, setNeedsSetup] = useState(false)
+  const [singleLibrary, setSingleLibrary] = useState(false)
+  const [defaultVaultPath, setDefaultVaultPath] = useState<string | null>(null)
 
   useEffect(() => {
     fetch("/api/health")
@@ -92,12 +95,19 @@ export default function App() {
     fetch("/api/aurora/config")
       .then((r) => r.json())
       .then((j) => {
+        setSingleLibrary(Boolean(j?.single_library))
+        setDefaultVaultPath(j?.default_vault || null)
         if (j?.configured && j?.config?.library_name) {
           setLibrary(j.config.library_name)
+          setLibraryOptions([j.config.library_name])
           setNeedsSetup(false)
         } else {
           setLibrary(null)
+          setLibraryOptions([])
           setNeedsSetup(true)
+          if (j?.single_library && j?.default_vault) {
+            setSetupPath(j.default_vault)
+          }
         }
       })
       .catch(() => {
@@ -114,6 +124,14 @@ export default function App() {
       // ignore
     }
   }, [library])
+
+  useEffect(() => {
+    if (library) {
+      setLibraryOptions([library])
+    } else if (!needsSetup) {
+      setLibraryOptions([])
+    }
+  }, [library, needsSetup])
 
   useEffect(() => {
     if (library) {
@@ -358,7 +376,8 @@ export default function App() {
   }, [activeTab, paperCache])
 
   async function submitSetupLibrary() {
-    if (!setupPath.trim()) {
+    const lockedPath = singleLibrary && defaultVaultPath ? defaultVaultPath : setupPath
+    if (!lockedPath.trim()) {
       setSetupError("Please provide a base directory")
       return
     }
@@ -369,7 +388,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          path: setupPath.trim(),
+          path: lockedPath.trim(),
           library: setupLibraryName.trim() || "aurora",
           vault: setupVaultName.trim() || "obsidian-vault",
           mode: setupMode,
@@ -380,7 +399,10 @@ export default function App() {
         throw new Error(j.detail || "Failed to set up library")
       }
       const j = await r.json()
-      if (j?.library) setLibrary(j.library)
+      if (j?.library) {
+        setLibrary(j.library)
+        setLibraryOptions([j.library])
+      }
       setSetupDone(true)
       setNeedsSetup(false)
     } catch (e: any) {
@@ -472,6 +494,7 @@ export default function App() {
             {showLibs && (
               <div className="absolute right-0 mt-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-lg z-30 min-w-45 max-h-60 overflow-y-auto animate-fade-in">
                   <LibsPanel
+                    libraries={libraryOptions}
                     onPick={(l) => {
                       setLibrary(l)
                       setShowLibs(false)
@@ -483,6 +506,7 @@ export default function App() {
                       setShowLibs(false)
                       setShowSetup(true)
                     }}
+                    hideSetup={singleLibrary && !needsSetup}
                   />
               </div>
             )}
@@ -866,7 +890,13 @@ export default function App() {
                     placeholder="/path/to/vault"
                     value={setupPath}
                     onChange={(e) => setSetupPath(e.target.value)}
+                    disabled={singleLibrary && Boolean(defaultVaultPath)}
                   />
+                  {singleLibrary && defaultVaultPath && (
+                    <div className="text-xs text-zinc-500">
+                      This instance is locked to the mounted vault path.
+                    </div>
+                  )}
 
                   {setupMode === "create" && (
                     <>
