@@ -962,6 +962,7 @@ export default function App() {
 
                 {settingsTab === "papis" && (
                   <div className="space-y-3">
+                    <p>Toggle Papis Cache Update</p>
                     <p className="text-sm text-zinc-600 dark:text-zinc-300">
                       Update the papis cache so changes on disk are reflected in Aurora.
                     </p>
@@ -978,8 +979,9 @@ export default function App() {
                       )}
                     </div>
                     <div className="space-y-2">
+                      <p>Papis Config Paths</p>
                       <p className="text-sm text-zinc-600 dark:text-zinc-300">
-                        Aurora uses a local papis config. Click a path to copy it.
+                        Aurora uses a local papis config at the below path.
                       </p>
                       {papisConfigLoading && (
                         <div className="text-sm text-zinc-500">Loading...</div>
@@ -989,20 +991,6 @@ export default function App() {
                       )}
                       {!papisConfigLoading && !papisConfigError && papisConfig && (
                         <div className="space-y-2">
-                          {papisConfig.config_dir && (
-                            <button
-                              className="w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                              onClick={() => copyPath(papisConfig.config_dir || "")}
-                              title="Click to copy"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="truncate">{papisConfig.config_dir}</span>
-                                <span className="text-xs text-zinc-400">
-                                  {copiedPath === papisConfig.config_dir ? "Copied" : "Copy"}
-                                </span>
-                              </div>
-                            </button>
-                          )}
                           {papisConfig.config_file && (
                             <button
                               className="w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
@@ -1017,21 +1005,7 @@ export default function App() {
                               </div>
                             </button>
                           )}
-                          {papisConfig.library_path && (
-                            <button
-                              className="w-full text-left text-sm px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                              onClick={() => copyPath(papisConfig.library_path || "")}
-                              title="Click to copy"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="truncate">{papisConfig.library_path}</span>
-                                <span className="text-xs text-zinc-400">
-                                  {copiedPath === papisConfig.library_path ? "Copied" : "Copy"}
-                                </span>
-                              </div>
-                            </button>
-                          )}
-                        </div>
+                      </div>
                       )}
                     </div>
                   </div>
