@@ -34,6 +34,7 @@ export function PaperDetail({
   const [savingState, setSavingState] = useState(false)
   const [stateError, setStateError] = useState<string | null>(null)
   const [openPdfError, setOpenPdfError] = useState<string | null>(null)
+  const [openNoteError, setOpenNoteError] = useState<string | null>(null)
   const [bibStatus, setBibStatus] = useState<string | null>(null)
   const [editMetaOpen, setEditMetaOpen] = useState(false)
   const [metaSaving, setMetaSaving] = useState(false)
@@ -187,6 +188,22 @@ export function PaperDetail({
     }
   }
 
+  async function handleOpenNote() {
+    setOpenNoteError(null)
+    try {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/open-note?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/open-note`
+      const r = await fetch(url, { method: "POST" })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to open note")
+      }
+    } catch (e: any) {
+      setOpenNoteError(e.message || "Failed to open note")
+    }
+  }
+
   async function handleCopyBib() {
     setBibStatus(null)
     try {
@@ -258,6 +275,12 @@ export function PaperDetail({
             </button>
           )}
           <button
+            className="px-1.5 py-1 rounded bg-aurora-500 text-white font-semibold shadow-sm transition-colors hover:bg-aurora-700"
+            onClick={handleOpenNote}
+          >
+            Open note
+          </button>
+          <button
             className="px-2 py-1 rounded bg-aurora-900 text-white transition-colors hover:bg-aurora-800"
             onClick={() => {
               if (confirm("Delete paper?")) {
@@ -279,6 +302,7 @@ export function PaperDetail({
 
       {loading && <div>Loading...</div>}
       {openPdfError && <div className="text-sm text-rose-500">{openPdfError}</div>}
+      {openNoteError && <div className="text-sm text-rose-500">{openNoteError}</div>}
 
       {!loading && paper && (
         <div className="flex flex-col lg:flex-row gap-4">
