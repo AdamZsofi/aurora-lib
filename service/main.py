@@ -1149,18 +1149,6 @@ def _open_with_default_app(path: Path) -> None:
     else:
         subprocess.Popen(["xdg-open", str(path)])
 
-def _open_uri(uri: str) -> bool:
-    try:
-        if sys.platform.startswith("darwin"):
-            subprocess.Popen(["open", uri])
-        elif sys.platform.startswith("win"):
-            subprocess.Popen(["cmd.exe", "/c", "start", "", uri])
-        else:
-            subprocess.Popen(["xdg-open", uri])
-        return True
-    except Exception:
-        return False
-
 def _unique_library_filename(folder: Path, name: str) -> str:
     path = folder / name
     if not path.exists():
@@ -1564,57 +1552,6 @@ def delete_paper(paper_id: str, library: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete paper: {e}")
-
-
-@app.post("/api/papers/{paper_id}/open-note")
-def open_note(paper_id: str, library: Optional[str] = None, debug: bool = False):
-    config = _get_obsidian_config()
-    if not config:
-        raise HTTPException(status_code=400, detail="Obsidian vault not configured")
-
-    try:
-        _set_library_from_param(library)
-        from papis.database import get_database
-        db = get_database()
-        doc = db.find_by_id(paper_id)
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Paper not found")
-        doc_json = _doc_to_json(doc)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to read papis database")
-
-    note_path = _find_note_by_papis_id(Path(config["notes_path"]), doc_json.get("id") or "")
-    if note_path is None:
-        note_path = _write_note_if_missing(doc_json, library, config)
-    if note_path is None:
-        raise HTTPException(status_code=500, detail="Failed to create or locate note")
-
-    vault_path = Path(config["vault_path"])
-    vault_name = config.get("vault_name") or vault_path.name
-    try:
-        rel = note_path.relative_to(vault_path).as_posix()
-    except Exception:
-        rel = note_path.name
-
-    path_uri = f"obsidian://open?path={urllib.parse.quote(str(note_path))}"
-    vault_uri = f"obsidian://open?vault={urllib.parse.quote(vault_name)}&file={urllib.parse.quote(rel)}"
-    opened = _open_uri(path_uri)
-    info = None
-    if not opened:
-        opened = _open_uri(vault_uri)
-    if not opened:
-        opened, info = _launch_obsidian(None, debug=debug)
-        if not opened:
-            raise HTTPException(status_code=500, detail="Failed to open Obsidian")
-
-    return {
-        "ok": True,
-        "note": str(note_path),
-        "debug": info if debug else None,
-        "uri": path_uri if opened else vault_uri,
-    }
 
 
 @app.post("/api/obsidian/open-vault")
