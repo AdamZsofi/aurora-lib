@@ -31,6 +31,7 @@ NOTE_BLOCK_END = "%% AURORA:END %%"
 READ_STATE_VALUES = [
     "unread",
     "want_to_read",
+    "reading",
     "read_abstract",
     "read_shallow",
     "read_deep",
@@ -38,6 +39,7 @@ READ_STATE_VALUES = [
 READ_STATE_EMOJI = {
     "unread": "⚪",
     "want_to_read": "⭐",
+    "reading": "📖",
     "read_abstract": "📄",
     "read_shallow": "📘",
     "read_deep": "📚",

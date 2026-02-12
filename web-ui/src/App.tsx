@@ -50,6 +50,7 @@ export default function App() {
   const [paperLoading, setPaperLoading] = useState<Record<string, boolean>>({})
   const libsDropdownRef = useRef<HTMLDivElement>(null)
   const tabsContainerRef = useRef<HTMLDivElement>(null)
+  const tagDropdownRef = useRef<HTMLDivElement>(null)
   const [tabsOverflowOpen, setTabsOverflowOpen] = useState(false)
   const [tabsContainerWidth, setTabsContainerWidth] = useState(0)
   const { theme, setTheme } = useTheme()
@@ -76,8 +77,12 @@ export default function App() {
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [paperSearch, setPaperSearch] = useState("")
   const [paperTagFilter, setPaperTagFilter] = useState<string[]>([])
+  const [paperReadFilter, setPaperReadFilter] = useState<string[]>([])
+  const [paperSortKey, setPaperSortKey] = useState<"title" | "year" | "authors" | null>(null)
+  const [paperSortDir, setPaperSortDir] = useState<"asc" | "desc">("asc")
   const [showFilters, setShowFilters] = useState(false)
   const [tagSearch, setTagSearch] = useState("")
+  const [showTagDropdown, setShowTagDropdown] = useState(false)
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(() => new Set())
   const [exportBibStatus, setExportBibStatus] = useState<string | null>(null)
   const [exportBibMode, setExportBibMode] = useState(false)
@@ -145,13 +150,21 @@ export default function App() {
     setActiveTab("__papers__")
     setPaperSearch("")
     setPaperTagFilter([])
+    setPaperReadFilter([])
+    setPaperSortKey(null)
+    setPaperSortDir("asc")
     setShowFilters(false)
     setTagSearch("")
+    setShowTagDropdown(false)
     setSelectedPaperIds(new Set())
     setExportBibStatus(null)
     setExportBibMode(false)
     setNeedsSetup(!library)
   }, [library])
+
+  useEffect(() => {
+    if (!showFilters) setShowTagDropdown(false)
+  }, [showFilters])
 
   useEffect(() => {
     restoredRef.current = true
@@ -207,6 +220,25 @@ export default function App() {
       document.removeEventListener("mousedown", handleClickOutside)
     }
   }, [showLibs])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        tagDropdownRef.current &&
+        !tagDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowTagDropdown(false)
+      }
+    }
+    if (showTagDropdown) {
+      document.addEventListener("mousedown", handleClickOutside)
+    } else {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [showTagDropdown])
 
   useEffect(() => {
     function handleResize() {
@@ -294,6 +326,7 @@ export default function App() {
     const q = paperSearch.trim().toLowerCase()
     const terms = q.split(/\s+/).filter(Boolean)
     const hasTagFilter = paperTagFilter.length > 0
+    const hasReadFilter = paperReadFilter.length > 0
     return papers.filter((p) => {
       const title = (p.title || "").toString().toLowerCase()
       const authors = Array.isArray(p.authors)
@@ -304,13 +337,48 @@ export default function App() {
         terms.length === 0 || terms.every((t) => haystack.includes(t))
       if (!matchesQuery) return false
 
+      if (hasReadFilter) {
+        const state = (p.read_state || p.raw?.aurora_read_state || "unread").toString()
+        if (!paperReadFilter.includes(state)) return false
+      }
+
       if (!hasTagFilter) return true
       const tags = Array.isArray(p.tags)
         ? p.tags.map((t) => t.toLowerCase())
         : []
       return paperTagFilter.some((t) => tags.includes(t))
     })
-  }, [papers, paperSearch, paperTagFilter])
+  }, [papers, paperSearch, paperTagFilter, paperReadFilter])
+
+  const sortedPapers = useMemo(() => {
+    if (!paperSortKey) return filteredPapers
+    const dir = paperSortDir === "desc" ? -1 : 1
+    const getAuthors = (p: Paper) => {
+      if (Array.isArray(p.authors)) return p.authors.join(", ")
+      return (p.authors || "").toString()
+    }
+    const getTitle = (p: Paper) => (p.title || "").toString()
+    const getYear = (p: Paper) => {
+      const raw = p.year ?? p.raw?.year
+      const num = typeof raw === "number" ? raw : parseInt((raw || "").toString(), 10)
+      return Number.isFinite(num) ? num : null
+    }
+
+    return [...filteredPapers].sort((a, b) => {
+      if (paperSortKey === "year") {
+        const ay = getYear(a)
+        const by = getYear(b)
+        if (ay === null && by === null) return 0
+        if (ay === null) return 1
+        if (by === null) return -1
+        return (ay - by) * dir
+      }
+
+      const av = paperSortKey === "title" ? getTitle(a) : getAuthors(a)
+      const bv = paperSortKey === "title" ? getTitle(b) : getAuthors(b)
+      return av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" }) * dir
+    })
+  }, [filteredPapers, paperSortKey, paperSortDir])
 
   async function exportSelectedBib() {
     if (selectedPaperIds.size === 0) return
@@ -694,6 +762,46 @@ export default function App() {
                     value={paperSearch}
                     onChange={(e) => setPaperSearch(e.target.value)}
                   />
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Filter by reading status</label>
+                    {paperReadFilter.length > 0 && (
+                      <button
+                        className="text-sm text-aurora-600 hover:text-aurora-700"
+                        onClick={() => setPaperReadFilter([])}
+                      >
+                        Clear status
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: "unread", label: "⚪ Unread" },
+                      { value: "want_to_read", label: "⭐ Want to read" },
+                      { value: "reading", label: "📖 Reading" },
+                      { value: "read_abstract", label: "📄 Read: abstract" },
+                      { value: "read_shallow", label: "📘 Read: shallow" },
+                      { value: "read_deep", label: "📚 Read: deep" },
+                    ].map((o) => {
+                      const active = paperReadFilter.includes(o.value)
+                      return (
+                        <button
+                          key={o.value}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                            active
+                              ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                          }`}
+                          onClick={() =>
+                            setPaperReadFilter((prev) =>
+                              active ? prev.filter((v) => v !== o.value) : [...prev, o.value]
+                            )
+                          }
+                        >
+                          {o.label}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
@@ -725,49 +833,67 @@ export default function App() {
                     ))}
                   </div>
 
-                  <input
-                    className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-                    placeholder="Search tags"
-                    value={tagSearch}
-                    onChange={(e) => setTagSearch(e.target.value)}
-                  />
+                  <div className="relative" ref={tagDropdownRef}>
+                    <input
+                      className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 w-full"
+                      placeholder="Search tags"
+                      value={tagSearch}
+                      onFocus={() => setShowTagDropdown(true)}
+                      onChange={(e) => {
+                        setTagSearch(e.target.value)
+                        setShowTagDropdown(true)
+                      }}
+                    />
 
-                  <div className="max-h-44 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded">
-                    {visibleTags.length === 0 && (
-                      <div className="px-3 py-2 text-sm text-zinc-500">No tags</div>
+                    {showTagDropdown && (
+                      <div className="absolute z-20 mt-2 w-full max-h-44 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 shadow-lg">
+                        {visibleTags.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-zinc-500">No tags</div>
+                        )}
+                        {visibleTags.map((tag) => {
+                          const active = paperTagFilter.includes(tag)
+                          return (
+                            <button
+                              key={tag}
+                              className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                                active ? "bg-aurora-50 dark:bg-aurora-900" : ""
+                              }`}
+                              onClick={() =>
+                                setPaperTagFilter((prev) =>
+                                  active ? prev.filter((t) => t !== tag) : [...prev, tag]
+                                )
+                              }
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="inline-block w-3 h-3 rounded" style={tagColor(tag)} />
+                                {tag}
+                              </span>
+                              {active && <span className="text-xs text-aurora-600">Selected</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
                     )}
-                    {visibleTags.map((tag) => {
-                      const active = paperTagFilter.includes(tag)
-                      return (
-                        <button
-                          key={tag}
-                          className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                            active ? "bg-aurora-50 dark:bg-aurora-900" : ""
-                          }`}
-                          onClick={() =>
-                            setPaperTagFilter((prev) =>
-                              active ? prev.filter((t) => t !== tag) : [...prev, tag]
-                            )
-                          }
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="inline-block w-3 h-3 rounded" style={tagColor(tag)} />
-                            {tag}
-                          </span>
-                          {active && <span className="text-xs text-aurora-600">Selected</span>}
-                        </button>
-                      )
-                    })}
                   </div>
                 </div>
               </div>
             )}
             <div className="overflow-x-auto">
               <PapersTable
-                papers={filteredPapers}
+                papers={sortedPapers}
                 library={library}
                 selectedIds={selectedPaperIds}
                 showSelection={exportBibMode}
+                sortKey={paperSortKey}
+                sortDir={paperSortDir}
+                onSort={(key) => {
+                  if (paperSortKey === key) {
+                    setPaperSortDir((prev) => (prev === "asc" ? "desc" : "asc"))
+                  } else {
+                    setPaperSortKey(key)
+                    setPaperSortDir("asc")
+                  }
+                }}
                 onToggleSelect={(id, checked) => {
                   if (!id) return
                   setSelectedPaperIds((prev) => {

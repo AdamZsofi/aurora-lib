@@ -104,6 +104,7 @@ export function PaperDetail({
   const readStateOptions = [
     { value: "unread", label: "⚪ Unread" },
     { value: "want_to_read", label: "⭐ Want to read" },
+    { value: "reading", label: "📖 Reading" },
     { value: "read_abstract", label: "📄 Read: abstract" },
     { value: "read_shallow", label: "📘 Read: shallow" },
     { value: "read_deep", label: "📚 Read: deep" },

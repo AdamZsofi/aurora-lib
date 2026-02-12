@@ -9,6 +9,9 @@ export function PapersTable({
   onToggleSelect,
   onToggleSelectAll,
   showSelection,
+  sortKey,
+  sortDir,
+  onSort,
 }: {
   papers: Paper[]
   onSelect: (id: string) => void // now opens a tab in parent
@@ -17,7 +20,15 @@ export function PapersTable({
   onToggleSelect: (id: string, checked: boolean) => void
   onToggleSelectAll: (checked: boolean) => void
   showSelection: boolean
+  sortKey: "title" | "year" | "authors" | null
+  sortDir: "asc" | "desc"
+  onSort: (key: "title" | "year" | "authors") => void
 }) {
+  const sortIndicator = (key: "title" | "year" | "authors") => {
+    if (sortKey !== key) return ""
+    return sortDir === "asc" ? "↑" : "↓"
+  }
+
   async function openPdf(id: string) {
     const url = library
       ? `/api/papers/${encodeURIComponent(id)}/pdf/open?library=${encodeURIComponent(library)}`
@@ -44,9 +55,36 @@ export function PapersTable({
               />
             </th>
           )}
-          <th className="px-3 py-2 text-left">Title</th>
-          <th className="px-3 py-2 text-left">Year</th>
-          <th className="px-3 py-2 text-left">Authors</th>
+          <th className="px-3 py-2 text-left">
+            <button
+              className="flex items-center gap-1 text-left w-full hover:text-aurora-700"
+              onClick={() => onSort("title")}
+              aria-sort={sortKey === "title" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+            >
+              <span>Title</span>
+              <span className="text-xs text-zinc-400">{sortIndicator("title")}</span>
+            </button>
+          </th>
+          <th className="px-3 py-2 text-left">
+            <button
+              className="flex items-center gap-1 text-left w-full hover:text-aurora-700"
+              onClick={() => onSort("year")}
+              aria-sort={sortKey === "year" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+            >
+              <span>Year</span>
+              <span className="text-xs text-zinc-400">{sortIndicator("year")}</span>
+            </button>
+          </th>
+          <th className="px-3 py-2 text-left">
+            <button
+              className="flex items-center gap-1 text-left w-full hover:text-aurora-700"
+              onClick={() => onSort("authors")}
+              aria-sort={sortKey === "authors" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+            >
+              <span>Authors</span>
+              <span className="text-xs text-zinc-400">{sortIndicator("authors")}</span>
+            </button>
+          </th>
           {/*<th className="px-3 py-2 text-left">DOI</th>*/}
           {/*<th className="px-3 py-2 text-left">Papis ID</th>*/}
           <th className="px-3 py-2 text-left">Actions</th>
