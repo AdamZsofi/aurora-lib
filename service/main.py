@@ -443,24 +443,24 @@ def paper_detail(paper_id: str, library: Optional[str] = None):
 @app.get("/api/resolve")
 def resolve(doi: str):
     try:
-        from papis.api import doi_to_data
+        doi = _normalize_doi(doi)
         if doi is None or doi == "":
             raise RuntimeError("DOI is empty")
-        data = doi_to_data(doi)
+        data = None
+        try:
+            from papis.api import doi_to_data
+            data = doi_to_data(doi)
+        except Exception:
+            data = _datacite_doi_to_data(doi)
+
         tags = _openalex_keywords_for_doi(doi)
         if tags and isinstance(data, dict):
             existing = data.get("tags") if isinstance(data.get("tags"), list) else []
             data["tags"] = list(dict.fromkeys([*existing, *tags]))
-        # convert to simple preview shape
-        title = data.get("title") or (data.get("message", {}).get("title") if isinstance(data, dict) else "")
-        authors = []
-        if isinstance(data, dict):
-            for a in data.get("author_list", []):
-                name = " ".join(filter(None, [a.get("given"), a.get("family")]))
-                authors.append(name)
-        return data #{"title": title, "authors": authors, "doi": data.get("DOI") or data.get("doi"), "year": data.get("year") or data.get("issued"), "all": data}
-    except Exception as e: 
-        raise HTTPException(status_code=500, detail="Failed to resolve DOI via papis: " + str(e))
+
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to resolve DOI: " + str(e))
 
 
 @app.get("/api/lib")
@@ -1290,7 +1290,7 @@ def _openalex_keywords_for_doi(doi: str) -> list[str]:
     if not doi:
         return []
     try:
-        doi_url = "https://doi.org/" + doi.strip()
+        doi_url = "https://doi.org/" + _normalize_doi(doi)
         encoded = urllib.parse.quote(doi_url, safe="")
         url = f"https://api.openalex.org/works/{encoded}"
         with urllib.request.urlopen(url, timeout=10) as resp:
@@ -1308,6 +1308,64 @@ def _openalex_keywords_for_doi(doi: str) -> list[str]:
         return list(dict.fromkeys(tags))
     except Exception:
         return []
+
+def _normalize_doi(doi: str) -> str:
+    value = (doi or "").strip()
+    if not value:
+        return ""
+    lower = value.lower()
+    if lower.startswith("http://") or lower.startswith("https://"):
+        try:
+            parsed = urllib.parse.urlparse(value)
+            if parsed.netloc.lower() in {"doi.org", "dx.doi.org"}:
+                return parsed.path.lstrip("/")
+        except Exception:
+            return value
+    return value
+
+def _datacite_doi_to_data(doi: str) -> dict:
+    """Resolve a DOI using DataCite API and map to papis-like metadata."""
+    doi = _normalize_doi(doi)
+    if not doi:
+        raise RuntimeError("DOI is empty")
+    encoded = urllib.parse.quote(doi.strip(), safe="")
+    url = f"https://api.datacite.org/dois/{encoded}"
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    attrs = data.get("data", {}).get("attributes", {}) if isinstance(data, dict) else {}
+    titles = attrs.get("titles") if isinstance(attrs.get("titles"), list) else []
+    title = ""
+    if titles:
+        first = titles[0]
+        title = first.get("title") if isinstance(first, dict) else str(first)
+
+    creators = attrs.get("creators") if isinstance(attrs.get("creators"), list) else []
+    author_list = []
+    author_names = []
+    for c in creators:
+        if isinstance(c, dict):
+            given = c.get("givenName") or ""
+            family = c.get("familyName") or c.get("name") or ""
+            author_list.append({"given": given, "family": family})
+            name = " ".join([x for x in [given, family] if x]).strip()
+            if name:
+                author_names.append(name)
+        elif isinstance(c, str):
+            author_list.append({"family": c})
+            author_names.append(c)
+
+    publication_year = attrs.get("publicationYear")
+    url_value = attrs.get("url") or ""
+
+    return {
+        "title": title or "",
+        "author_list": author_list,
+        "author": " and ".join(author_names) if author_names else "",
+        "year": publication_year or "",
+        "doi": doi,
+        "url": url_value,
+        "source": "datacite",
+    }
 
 _bootstrap_from_env()
 
@@ -1633,7 +1691,14 @@ def resolve_dois(body: dict = Body(...)):
                 items.append({"doi": doi, "ok": False, "error": "Missing DOI"})
                 continue
             try:
-                data = doi_to_data(doi)
+                doi = _normalize_doi(doi)
+                if not doi:
+                    items.append({"doi": doi, "ok": False, "error": "Missing DOI"})
+                    continue
+                try:
+                    data = doi_to_data(doi)
+                except Exception:
+                    data = _datacite_doi_to_data(doi)
                 tags = _openalex_keywords_for_doi(doi)
                 if tags and isinstance(data, dict):
                     existing = data.get("tags") if isinstance(data.get("tags"), list) else []

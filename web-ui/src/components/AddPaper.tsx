@@ -341,6 +341,7 @@ export function AddPaper({
                   {metaSummary(metadata).authors ? "Authors: " + metaSummary(metadata).authors : ""}
                 </div>
                 <div className="text-sm text-zinc-500">Year: {metaSummary(metadata).year || "(unknown)"}</div>
+                <div className="text-sm text-zinc-500">Source: {metadata?.source || "crossref"}</div>
                 {metaSummary(metadata).url && (
                   <div className="text-sm text-aurora-700 truncate">
                     <a href={metaSummary(metadata).url} target="_blank" rel="noreferrer">
@@ -584,6 +585,7 @@ export function AddPaper({
                     {item.year && (
                       <div className="text-sm text-zinc-500">Year: {item.year}</div>
                     )}
+                    <div className="text-sm text-zinc-500">Source: {item.metadata?.source || (item.resolved ? "crossref" : "-")}</div>
                     {item.url && (
                       <div className="text-sm text-aurora-700 truncate">
                         <a href={item.url} target="_blank" rel="noreferrer">
