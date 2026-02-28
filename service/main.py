@@ -26,8 +26,10 @@ AURORA_CONFIG_FILE = Path(__file__).parent / ".aurora_config.json"
 VAULT_CONFIG_FILENAME = ".aurora-lib.json"
 AURORA_PAPIS_CONFIG_DIR = Path(__file__).parent / ".papis"
 DEFAULT_NOTES_DIR = "paper-notes"
-NOTE_BLOCK_BEGIN = "%% AURORA:BEGIN %%"
-NOTE_BLOCK_END = "%% AURORA:END %%"
+LEGACY_NOTE_BLOCK_BEGIN = "%% AURORA:BEGIN %%"
+LEGACY_NOTE_BLOCK_END = "%% AURORA:END %%"
+LEGACY_NOTE_BLOCK_BEGIN_HTML = "<!-- AURORA:BEGIN -->"
+LEGACY_NOTE_BLOCK_END_HTML = "<!-- AURORA:END -->"
 READ_STATE_VALUES = [
     "unread",
     "want_to_read",
@@ -600,6 +602,36 @@ def get_tags(library: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read tags: {e}")
 
+@app.post("/api/notes/refresh")
+def refresh_notes(library: Optional[str] = None):
+    """Regenerate/update Obsidian note headers for all papers."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    config = _get_obsidian_config()
+    if not config:
+        raise HTTPException(status_code=400, detail="Obsidian vault not configured")
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+        db = get_database()
+        updated = 0
+        skipped = 0
+        for doc in db.get_all_documents():
+            try:
+                doc_json = _doc_to_json(doc)
+                note_path = _write_note_if_missing(doc_json, library, config)
+                if note_path:
+                    updated += 1
+                else:
+                    skipped += 1
+            except Exception:
+                skipped += 1
+        return {"ok": True, "updated": updated, "skipped": skipped, "notes_path": config.get("notes_path")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh notes: {e}")
+
 @app.post("/api/papers/{paper_id}/tags")
 def set_paper_tags(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
     """Set tags for a paper. Body: {'tags': ['tag1', 'tag2']}"""
@@ -620,7 +652,16 @@ def set_paper_tags(paper_id: str, body: dict = Body(...), library: Optional[str]
             raise HTTPException(status_code=404, detail="Paper not found")
         doc["tags"] = tags
         save_doc(doc)
-        return {"ok": True, "paper": _doc_to_json(doc)}
+        doc_json = _doc_to_json(doc)
+        config = _get_obsidian_config()
+        if config:
+            try:
+                note_path = _write_note_if_missing(doc_json, library, config)
+                if note_path:
+                    _upsert_note_header(note_path, _note_header(doc_json, library))
+            except Exception:
+                pass
+        return {"ok": True, "paper": doc_json}
     except HTTPException:
         raise
     except Exception as e:
@@ -696,7 +737,16 @@ def add_paper_note(paper_id: str, body: dict = Body(...), library: Optional[str]
             notes.append({"author": clean_author, "text": clean_text})
         doc["user_notes"] = notes
         save_doc(doc)
-        return {"ok": True, "paper": _doc_to_json(doc)}
+        doc_json = _doc_to_json(doc)
+        config = _get_obsidian_config()
+        if config:
+            try:
+                note_path = _write_note_if_missing(doc_json, library, config)
+                if note_path:
+                    _upsert_note_header(note_path, _note_header(doc_json, library))
+            except Exception:
+                pass
+        return {"ok": True, "paper": doc_json}
     except HTTPException:
         raise
     except Exception as e:
@@ -849,12 +899,61 @@ def _ensure_obsidian_dirs(vault_path: Path) -> Path:
     return notes_path
 
 def _note_header(doc: dict, library: Optional[str]) -> str:
+    generated = _build_generated_note_block(doc)
     return "\n".join([
         _build_frontmatter(doc, library),
+        "",
+        generated,
         "",
         "## Notes",
         "",
     ])
+
+def _build_generated_note_block(doc: dict) -> str:
+    pdf_link = _note_pdf_link(doc)
+    if pdf_link:
+        label, rel_path = pdf_link
+        return f"**Link to pdf:** [{label}]({rel_path})"
+    return ""
+
+def _note_pdf_link(doc: dict) -> Optional[tuple[str, str]]:
+    files = doc.get("files") if isinstance(doc.get("files"), list) else []
+    pdf_file = None
+    for f in files:
+        if isinstance(f, str) and f.lower().endswith(".pdf"):
+            pdf_file = f
+            break
+    if not pdf_file:
+        return None
+
+    pdf_path = Path(pdf_file)
+    aurora_cfg = _load_aurora_config()
+    vault_path = Path(aurora_cfg.get("vault_path")) if isinstance(aurora_cfg.get("vault_path"), str) else None
+    library_path = Path(aurora_cfg.get("library_path")) if isinstance(aurora_cfg.get("library_path"), str) else None
+    folder_name = doc.get("folder_name") or doc.get("raw", {}).get("folder") or doc.get("raw", {}).get("dir")
+
+    rel_path = None
+    if pdf_path.is_absolute() and vault_path:
+        try:
+            rel_path = pdf_path.relative_to(vault_path)
+        except Exception:
+            rel_path = None
+    if rel_path is None:
+        if library_path and vault_path:
+            try:
+                library_rel = library_path.relative_to(vault_path)
+            except Exception:
+                library_rel = None
+            if library_rel is not None:
+                if folder_name:
+                    rel_path = library_rel / str(folder_name) / pdf_path.name
+                else:
+                    rel_path = library_rel / pdf_path.name
+        if rel_path is None:
+            rel_path = Path(pdf_path.name)
+
+    label = pdf_path.name
+    return label, rel_path.as_posix()
 
 def _build_frontmatter(doc: dict, library: Optional[str]) -> str:
     def j(value):
@@ -888,14 +987,21 @@ def _upsert_note_header(note_path: Path, header: str) -> None:
     content = note_path.read_text(encoding="utf-8")
     body = _strip_frontmatter(content)
     body = _strip_generated_block(body)
+    body = _strip_until_notes_heading(body)
 
-    new_content = "\n".join([
+    generated = _build_generated_from_header(header)
+    parts = [
         _build_frontmatter_from_header(header),
         "",
-        _build_generated_from_header(header),
+    ]
+    if generated:
+        parts.extend([generated, ""])
+    parts.extend([
+        "## Notes",
         "",
         body.lstrip("\n"),
     ])
+    new_content = "\n".join(parts)
 
     note_path.write_text(new_content, encoding="utf-8")
 
@@ -909,11 +1015,24 @@ def _strip_frontmatter(content: str) -> str:
     return content[end_idx:]
 
 def _strip_generated_block(content: str) -> str:
-    if NOTE_BLOCK_BEGIN in content and NOTE_BLOCK_END in content:
-        start = content.index(NOTE_BLOCK_BEGIN)
-        end = content.index(NOTE_BLOCK_END) + len(NOTE_BLOCK_END)
+    if LEGACY_NOTE_BLOCK_BEGIN in content and LEGACY_NOTE_BLOCK_END in content:
+        start = content.index(LEGACY_NOTE_BLOCK_BEGIN)
+        end = content.index(LEGACY_NOTE_BLOCK_END) + len(LEGACY_NOTE_BLOCK_END)
+        return content[:start] + content[end:]
+    if LEGACY_NOTE_BLOCK_BEGIN_HTML in content and LEGACY_NOTE_BLOCK_END_HTML in content:
+        start = content.index(LEGACY_NOTE_BLOCK_BEGIN_HTML)
+        end = content.index(LEGACY_NOTE_BLOCK_END_HTML) + len(LEGACY_NOTE_BLOCK_END_HTML)
         return content[:start] + content[end:]
     return content
+
+def _strip_until_notes_heading(content: str) -> str:
+    marker = "\n## Notes"
+    idx = content.find(marker)
+    if idx == -1:
+        if content.lstrip().startswith("## Notes"):
+            return content.lstrip()[len("## Notes"):].lstrip("\n")
+        return content
+    return content[idx + len(marker):].lstrip("\n")
 
 def _build_frontmatter_from_header(header: str) -> str:
     if header.startswith("---"):
@@ -923,11 +1042,13 @@ def _build_frontmatter_from_header(header: str) -> str:
     return header
 
 def _build_generated_from_header(header: str) -> str:
-    if NOTE_BLOCK_BEGIN in header and NOTE_BLOCK_END in header:
-        start = header.index(NOTE_BLOCK_BEGIN)
-        end = header.index(NOTE_BLOCK_END) + len(NOTE_BLOCK_END)
-        return header[start:end]
-    return ""
+    body = _strip_frontmatter(header)
+    body = _strip_generated_block(body)
+    marker = "\n## Notes"
+    idx = body.find(marker)
+    if idx == -1:
+        return body.strip()
+    return body[:idx].strip()
 
 def _write_note_if_missing(doc: dict, library: Optional[str], config: dict) -> Optional[Path]:
     notes_path = Path(config["notes_path"])

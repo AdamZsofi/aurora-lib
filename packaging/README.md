@@ -29,6 +29,13 @@ You can change host/port/log level:
 - AURORA_PORT
 - AURORA_LOG_LEVEL
 
+## Notes about user services
+
+- The service runs as your user inside your login session. This allows GUI actions like opening PDFs.
+- The service starts when you log in. If you want it to run at boot without logging in, enable lingering:
+
+   loginctl enable-linger $USER
+
 ## Docker (single image)
 
 Build and run a single container that serves the UI on localhost:5173.

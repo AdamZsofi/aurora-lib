@@ -33,8 +33,10 @@ cat "${ROOT_DIR}/packaging/systemd/aurora-lib.service.template" \
   | sed "s|__AURORA_ROOT__|${ROOT_DIR}|g" \
   > "${SERVICE_FILE}"
 
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH
 systemctl --user daemon-reload
 systemctl --user enable aurora-lib.service
 systemctl --user restart aurora-lib.service
 
-printf "\nAurora Lib installed and started.\nOpen: http://localhost:5173\n"
+printf "\nAurora Lib installed and started as a user service.\nOpen: http://localhost:5173\n"
+printf "If you want it to run at boot without login, enable lingering:\n  loginctl enable-linger $USER\n"

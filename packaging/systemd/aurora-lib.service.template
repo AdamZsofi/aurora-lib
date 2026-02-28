@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 WorkingDirectory=__AURORA_ROOT__
 EnvironmentFile=%h/.config/aurora-lib/aurora-lib.env
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH
 ExecStart=__AURORA_ROOT__/packaging/bin/aurora-lib
 Restart=on-failure
 RestartSec=2

@@ -64,9 +64,11 @@ export default function App() {
   const [openVaultError, setOpenVaultError] = useState<string | null>(null)
   const [openVaultWorking, setOpenVaultWorking] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<"help" | "libraries" | "papis">("help")
+  const [settingsTab, setSettingsTab] = useState<"help" | "libraries" | "papis" | "development">("help")
   const [cacheUpdating, setCacheUpdating] = useState(false)
   const [cacheMessage, setCacheMessage] = useState<string | null>(null)
+  const [notesRefreshing, setNotesRefreshing] = useState(false)
+  const [notesRefreshMessage, setNotesRefreshMessage] = useState<string | null>(null)
   const [libsDetails, setLibsDetails] = useState<Array<{ name: string; paths: string[] }>>([])
   const [libsLoading, setLibsLoading] = useState(false)
   const [libsError, setLibsError] = useState<string | null>(null)
@@ -529,6 +531,29 @@ export default function App() {
     }
   }
 
+  async function refreshNotes() {
+    setNotesRefreshing(true)
+    setNotesRefreshMessage(null)
+    try {
+      const url = library
+        ? `/api/notes/refresh?library=${encodeURIComponent(library)}`
+        : "/api/notes/refresh"
+      const r = await fetch(url, { method: "POST" })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to refresh notes")
+      }
+      const j = await r.json().catch(() => ({}))
+      const updated = typeof j.updated === "number" ? j.updated : 0
+      const skipped = typeof j.skipped === "number" ? j.skipped : 0
+      setNotesRefreshMessage(`Updated ${updated} note(s), skipped ${skipped}.`)
+    } catch (e: any) {
+      setNotesRefreshMessage(e.message || "Failed to refresh notes")
+    } finally {
+      setNotesRefreshing(false)
+    }
+  }
+
   async function copyPath(path: string) {
     try {
       await navigator.clipboard.writeText(path)
@@ -545,7 +570,7 @@ export default function App() {
       <header className="w-full px-6 py-4 flex justify-between items-center bg-white/80 dark:bg-zinc-900/80 shadow-sm border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <span className="text-2xl mr-2" aria-label="Aurora">🌌</span>
-          <h1 className="text-3xl font-bold text-aurora-500 dark:text-aurora-400 m-0">Aurora Lib</h1>
+          <h1 className="text-3xl font-bold text-aurora-500 dark:text-aurora-400 m-0">Galatea</h1>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative" ref={libsDropdownRef}>
@@ -1114,6 +1139,12 @@ export default function App() {
                   >
                     Libraries
                   </button>
+                  <button
+                    className={`px-3 py-1 rounded border text-sm ${settingsTab === "development" ? "border-aurora-500 bg-aurora-50 text-aurora-800" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800"}`}
+                    onClick={() => setSettingsTab("development")}
+                  >
+                    Development
+                  </button>
                 </div>
 
                 {settingsTab === "papis" && (
@@ -1230,6 +1261,26 @@ export default function App() {
                     <p>
                       Tip: You can version control your library if you set up a git repository and choose that to be your library.
                     </p>
+                  </div>
+                )}
+
+                {settingsTab === "development" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                      Maintenance helpers for existing libraries.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
+                        onClick={refreshNotes}
+                        disabled={notesRefreshing}
+                      >
+                        {notesRefreshing ? "Refreshing..." : "Refresh note links"}
+                      </button>
+                      {notesRefreshMessage && (
+                        <span className="text-sm text-zinc-500 dark:text-zinc-300">{notesRefreshMessage}</span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
