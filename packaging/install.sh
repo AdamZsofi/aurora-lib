@@ -33,6 +33,20 @@ cat "${ROOT_DIR}/packaging/systemd/aurora-lib.service.template" \
   | sed "s|__AURORA_ROOT__|${ROOT_DIR}|g" \
   > "${SERVICE_FILE}"
 
+AUTOSTART_DIR="${HOME}/.config/autostart"
+AUTOSTART_FILE="${AUTOSTART_DIR}/aurora-lib-env.desktop"
+mkdir -p "${AUTOSTART_DIR}"
+if [[ ! -f "${AUTOSTART_FILE}" ]]; then
+  cat > "${AUTOSTART_FILE}" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Aurora Lib Env Import
+Exec=systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH && systemctl --user restart aurora-lib
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+fi
+
 systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH
 systemctl --user daemon-reload
 systemctl --user enable aurora-lib.service

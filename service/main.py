@@ -920,9 +920,14 @@ def _note_pdf_link(doc: dict) -> Optional[tuple[str, str]]:
     files = doc.get("files") if isinstance(doc.get("files"), list) else []
     pdf_file = None
     for f in files:
-        if isinstance(f, str) and f.lower().endswith(".pdf"):
+        if isinstance(f, str) and f.lower().endswith(".pdf") and ("annotated" in f.lower() or "dirty" in f.lower()):
             pdf_file = f
             break
+    if not pdf_file:
+        for f in files:
+            if isinstance(f, str) and f.lower().endswith(".pdf"):
+                pdf_file = f
+                break
     if not pdf_file:
         return None
 
@@ -930,7 +935,12 @@ def _note_pdf_link(doc: dict) -> Optional[tuple[str, str]]:
     aurora_cfg = _load_aurora_config()
     vault_path = Path(aurora_cfg.get("vault_path")) if isinstance(aurora_cfg.get("vault_path"), str) else None
     library_path = Path(aurora_cfg.get("library_path")) if isinstance(aurora_cfg.get("library_path"), str) else None
-    folder_name = doc.get("folder_name") or doc.get("raw", {}).get("folder") or doc.get("raw", {}).get("dir")
+    folder_name = (
+        doc.get("folder_name")
+        or doc.get("raw", {}).get("folder")
+        or doc.get("raw", {}).get("dir")
+        or doc.get("id")
+    )
 
     rel_path = None
     if pdf_path.is_absolute() and vault_path:

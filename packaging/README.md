@@ -32,6 +32,7 @@ You can change host/port/log level:
 ## Notes about user services
 
 - The service runs as your user inside your login session. This allows GUI actions like opening PDFs.
+- The installer also adds a GUI autostart entry (~/.config/autostart/aurora-lib-env.desktop) to import environment variables when you log into a desktop session.
 - The service starts when you log in. If you want it to run at boot without logging in, enable lingering:
 
    loginctl enable-linger $USER
