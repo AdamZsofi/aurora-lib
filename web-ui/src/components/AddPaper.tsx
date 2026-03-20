@@ -15,6 +15,7 @@ type BatchItem = {
   selected: boolean
   file?: File | null
   tags?: string[]
+  contexts?: string[]
   metaOpen?: boolean
   status?: "idle" | "adding" | "done" | "error"
 }
@@ -40,6 +41,9 @@ export function AddPaper({
   const [existingTags, setExistingTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState("")
   const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [existingContexts, setExistingContexts] = useState<string[]>([])
+  const [contextInput, setContextInput] = useState("")
+  const [selectedContexts, setSelectedContexts] = useState<string[]>([])
 
   // Batch add
   const [bibFile, setBibFile] = useState<File | null>(null)
@@ -48,6 +52,8 @@ export function AddPaper({
   const [batchWorking, setBatchWorking] = useState(false)
   const [batchTagInput, setBatchTagInput] = useState("")
   const [batchTags, setBatchTags] = useState<string[]>([])
+  const [batchContextInput, setBatchContextInput] = useState("")
+  const [batchContexts, setBatchContexts] = useState<string[]>([])
 
   function metaSummary(meta: any) {
     const rawTitle = meta?.title || meta?.message?.title || "(no title)"
@@ -108,7 +114,10 @@ export function AddPaper({
       const metaWithTags = selectedTags.length
         ? { ...metadata, tags: Array.from(new Set([...(metadata.tags || []), ...selectedTags])) }
         : metadata
-      form.append("metadata", JSON.stringify(metaWithTags))
+      const metaWithContexts = selectedContexts.length
+        ? { ...metaWithTags, contexts: Array.from(new Set([...(metaWithTags.contexts || []), ...selectedContexts])) }
+        : metaWithTags
+      form.append("metadata", JSON.stringify(metaWithContexts))
       if (file) form.append("file", file)
 
       const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
@@ -193,6 +202,11 @@ export function AddPaper({
             year: summary?.year || it.year,
             url: summary?.url || it.url,
             tags: Array.isArray(resolved.metadata?.tags) ? resolved.metadata.tags : it.tags,
+            contexts: Array.isArray(resolved.metadata?.contexts)
+              ? resolved.metadata.contexts
+              : Array.isArray(resolved.metadata?.projects)
+                ? resolved.metadata.projects
+                : it.contexts,
             error: resolved.error,
           }
         })
@@ -225,11 +239,22 @@ export function AddPaper({
           : Array.isArray(item.metadata?.tags)
             ? item.metadata.tags
             : []
+        const baseContexts = Array.isArray(item.contexts)
+          ? item.contexts
+          : Array.isArray(item.metadata?.contexts)
+            ? item.metadata.contexts
+            : Array.isArray(item.metadata?.projects)
+              ? item.metadata.projects
+              : []
         const metaWithTags = {
           ...item.metadata,
           tags: Array.from(new Set([...(baseTags || []), ...batchTags])),
         }
-        form.append("metadata", JSON.stringify(metaWithTags))
+        const metaWithContexts = {
+          ...metaWithTags,
+          contexts: Array.from(new Set([...(baseContexts || []), ...batchContexts])),
+        }
+        form.append("metadata", JSON.stringify(metaWithContexts))
         if (item.file) form.append("file", item.file)
         const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
         const r = await fetch(url, { method: "POST", body: form })
@@ -258,6 +283,14 @@ export function AddPaper({
       .then((r) => r.json())
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
+  }, [library])
+
+  useEffect(() => {
+    const url = library ? `/api/contexts?library=${encodeURIComponent(library)}` : "/api/contexts"
+    fetch(url)
+      .then((r) => r.json())
+      .then((j) => setExistingContexts(j.contexts || []))
+      .catch(() => setExistingContexts([]))
   }, [library])
 
   useEffect(() => {
@@ -391,6 +424,54 @@ export function AddPaper({
                       <button
                         className="ml-1 text-xs"
                         onClick={() => setSelectedTags(selectedTags.filter((x) => x !== t))}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mb-2">
+              <div className="flex items-center gap-2">
+                <input
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full max-w-md bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  placeholder="Add context"
+                  list="context-suggestions"
+                  value={contextInput}
+                  onChange={(e) => setContextInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      addTag(contextInput, setSelectedContexts, selectedContexts)
+                      setContextInput("")
+                    }
+                  }}
+                />
+                <button
+                  className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors"
+                  onClick={() => {
+                    addTag(contextInput, setSelectedContexts, selectedContexts)
+                    setContextInput("")
+                  }}
+                >
+                  Add context
+                </button>
+                <datalist id="context-suggestions">
+                  {existingContexts.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </div>
+              {selectedContexts.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {selectedContexts.map((c) => (
+                    <span key={c} className="px-2 py-0.5 rounded text-xs" style={tagColor(c)}>
+                      {c}
+                      <button
+                        className="ml-1 text-xs"
+                        onClick={() => setSelectedContexts(selectedContexts.filter((x) => x !== c))}
                       >
                         ×
                       </button>
@@ -547,11 +628,53 @@ export function AddPaper({
               {batchTags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {batchTags.map((t) => (
-                    <span key={t} className={`px-2 py-0.5 rounded text-xs ${tagColor(t)}`}>
+                    <span key={t} className="px-2 py-0.5 rounded text-xs" style={tagColor(t)}>
                       {t}
                       <button
                         className="ml-1 text-xs"
                         onClick={() => setBatchTags(batchTags.filter((x) => x !== t))}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="text-sm font-semibold mt-3 mb-2">Batch contexts</div>
+              <div className="flex items-center gap-2">
+                <input
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full max-w-md bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  placeholder="Add context for all selected"
+                  list="context-suggestions"
+                  value={batchContextInput}
+                  onChange={(e) => setBatchContextInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      addTag(batchContextInput, setBatchContexts, batchContexts)
+                      setBatchContextInput("")
+                    }
+                  }}
+                />
+                <button
+                  className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors"
+                  onClick={() => {
+                    addTag(batchContextInput, setBatchContexts, batchContexts)
+                    setBatchContextInput("")
+                  }}
+                >
+                  Add context
+                </button>
+              </div>
+              {batchContexts.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {batchContexts.map((c) => (
+                    <span key={c} className="px-2 py-0.5 rounded text-xs" style={tagColor(c)}>
+                      {c}
+                      <button
+                        className="ml-1 text-xs"
+                        onClick={() => setBatchContexts(batchContexts.filter((x) => x !== c))}
                       >
                         ×
                       </button>
@@ -649,6 +772,46 @@ export function AddPaper({
                                 setBatchItems((prev) => prev.map((i) =>
                                   i.id === item.id
                                     ? { ...i, tags: (i.tags || []).filter((x) => x !== t) }
+                                    : i
+                                ))
+                              }
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                      placeholder="Add context"
+                      list="context-suggestions"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          const value = (e.currentTarget as HTMLInputElement).value
+                          const clean = value.trim().toLowerCase()
+                          if (!clean) return
+                          setBatchItems((prev) => prev.map((i) =>
+                            i.id === item.id
+                              ? { ...i, contexts: Array.from(new Set([...(i.contexts || []), clean])) }
+                              : i
+                          ))
+                          e.currentTarget.value = ""
+                        }
+                      }}
+                    />
+                    {Array.isArray(item.contexts) && item.contexts.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {item.contexts.map((c) => (
+                          <span key={c} className="px-2 py-0.5 rounded text-xs" style={tagColor(c)}>
+                            {c}
+                            <button
+                              className="ml-1 text-xs"
+                              onClick={() =>
+                                setBatchItems((prev) => prev.map((i) =>
+                                  i.id === item.id
+                                    ? { ...i, contexts: (i.contexts || []).filter((x) => x !== c) }
                                     : i
                                 ))
                               }

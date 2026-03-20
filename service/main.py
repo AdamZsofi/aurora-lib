@@ -220,6 +220,7 @@ def _doc_to_json(doc) -> dict:
         "year": doc.get("year") or doc.get("issued") or "",
         "files": doc.get("files") or [],
         "tags": doc.get("tags") or [],
+        "contexts": doc.get("contexts") or doc.get("projects") or [],
         "user_notes": doc.get("user_notes") or [],
         "read_state": doc.get("aurora_read_state") or "unread",
         "folder_name": None,
@@ -602,6 +603,31 @@ def get_tags(library: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read tags: {e}")
 
+
+@app.get("/api/contexts")
+def get_contexts(library: Optional[str] = None):
+    """Return list of unique contexts across the library."""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+        db = get_database()
+        contexts = set()
+        for doc in db.get_all_documents():
+            doc_contexts = doc.get("contexts") or doc.get("projects") or []
+            if isinstance(doc_contexts, list):
+                contexts.update([c for c in doc_contexts if isinstance(c, str) and c.strip()])
+        return {"contexts": sorted(contexts)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read contexts: {e}")
+
+
+@app.get("/api/projects")
+def get_projects(library: Optional[str] = None):
+    """Back-compat: Return list of unique contexts across the library."""
+    return get_contexts(library)
+
 @app.post("/api/notes/refresh")
 def refresh_notes(library: Optional[str] = None):
     """Regenerate/update Obsidian note headers for all papers."""
@@ -666,6 +692,52 @@ def set_paper_tags(paper_id: str, body: dict = Body(...), library: Optional[str]
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update tags: {e}")
+
+
+@app.post("/api/papers/{paper_id}/contexts")
+def set_paper_contexts(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
+    """Set contexts for a paper. Body: {'contexts': ['ctx1', 'ctx2']}"""
+    if not papis_importable():
+        raise HTTPException(status_code=500, detail="papis library not available in this environment")
+    contexts = body.get("contexts") if isinstance(body, dict) else None
+    if not isinstance(contexts, list):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'contexts' list")
+    contexts = [_normalize_tag(c) for c in contexts if isinstance(c, str) and c.strip()]
+    try:
+        _set_library_from_param(library)
+        from papis.database import get_database
+        from papis.api import save_doc
+
+        db = get_database()
+        doc = db.find_by_id(paper_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        doc["contexts"] = contexts
+        save_doc(doc)
+        doc_json = _doc_to_json(doc)
+        config = _get_obsidian_config()
+        if config:
+            try:
+                note_path = _write_note_if_missing(doc_json, library, config)
+                if note_path:
+                    _upsert_note_header(note_path, _note_header(doc_json, library))
+            except Exception:
+                pass
+        return {"ok": True, "paper": doc_json}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update contexts: {e}")
+
+
+@app.post("/api/papers/{paper_id}/projects")
+def set_paper_projects(paper_id: str, body: dict = Body(...), library: Optional[str] = None):
+    """Back-compat: Set contexts for a paper. Body: {'projects': ['proj1', 'proj2']}"""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid body")
+    if "contexts" not in body:
+        body = {**body, "contexts": body.get("projects")}
+    return set_paper_contexts(paper_id, body, library)
 
 
 @app.post("/api/papers/{paper_id}/state")
@@ -970,8 +1042,16 @@ def _build_frontmatter(doc: dict, library: Optional[str]) -> str:
         return json.dumps(value, ensure_ascii=False)
 
     authors = doc.get("authors") if isinstance(doc.get("authors"), list) else []
-    raw_tags = doc.get("tags") if isinstance(doc.get("tags"), list) else []
+    raw_tags = doc.get("tags")
+    if not isinstance(raw_tags, list):
+        raw_tags = []
     tags = [str(t).strip().replace(" ", "-") for t in raw_tags if str(t).strip()]
+    raw_contexts = doc.get("contexts")
+    if not isinstance(raw_contexts, list):
+        raw_contexts = doc.get("projects")
+    if not isinstance(raw_contexts, list):
+        raw_contexts = []
+    contexts = [str(c).strip().replace(" ", "-") for c in raw_contexts if str(c).strip()]
     read_state = doc.get("read_state") or "unread"
     read_state = read_state if read_state in READ_STATE_VALUES else "unread"
 
@@ -983,6 +1063,7 @@ def _build_frontmatter(doc: dict, library: Optional[str]) -> str:
         f"url: {j(doc.get('raw', {}).get('URL') or doc.get('raw', {}).get('url') or doc.get('raw', {}).get('link') or '')}",
         f"year: {j(doc.get('year') or '')}",
         f"tags: {j(tags)}",
+        f"contexts: {j(contexts)}",
         f"papis_id: {j(doc.get('id') or '')}",
         f"library: {j(library or '')}",
         f"read_state: {j(read_state)}",
@@ -1396,7 +1477,14 @@ def add_paper(
             raise HTTPException(status_code=400, detail="Invalid metadata JSON")
 
     if isinstance(meta.get("tags"), list):
-        meta["tags"] = [t for t in (_normalize_tag(x) for x in meta.get("tags")) if t]
+        raw_meta_tags = meta.get("tags") or []
+        meta["tags"] = [t for t in (_normalize_tag(x) for x in raw_meta_tags) if t]
+    if isinstance(meta.get("contexts"), list):
+        raw_meta_contexts = meta.get("contexts") or []
+        meta["contexts"] = [c for c in (_normalize_tag(x) for x in raw_meta_contexts) if c]
+    elif isinstance(meta.get("projects"), list):
+        raw_meta_projects = meta.get("projects") or []
+        meta["contexts"] = [c for c in (_normalize_tag(x) for x in raw_meta_projects) if c]
 
     file_path = None
     if file is not None:

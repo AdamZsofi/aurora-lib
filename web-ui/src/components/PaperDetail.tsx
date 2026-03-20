@@ -30,6 +30,11 @@ export function PaperDetail({
   const [tags, setTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
   const [tagError, setTagError] = useState<string | null>(null)
+  const [existingContexts, setExistingContexts] = useState<string[]>([])
+  const [contextInput, setContextInput] = useState("")
+  const [contexts, setContexts] = useState<string[]>([])
+  const [savingContexts, setSavingContexts] = useState(false)
+  const [contextError, setContextError] = useState<string | null>(null)
   const [readState, setReadState] = useState<string>("unread")
   const [savingState, setSavingState] = useState(false)
   const [stateError, setStateError] = useState<string | null>(null)
@@ -51,6 +56,11 @@ export function PaperDetail({
 
   useEffect(() => {
     setTags(Array.isArray(paper?.tags) ? paper.tags : [])
+    setContexts(Array.isArray(paper?.contexts)
+      ? paper.contexts
+      : Array.isArray(paper?.projects)
+        ? paper.projects
+        : [])
     const nextState = paper?.read_state || paper?.raw?.aurora_read_state || "unread"
     setReadState(nextState)
     setMetaForm({
@@ -71,6 +81,14 @@ export function PaperDetail({
       .then((r) => r.json())
       .then((j) => setExistingTags(j.tags || []))
       .catch(() => setExistingTags([]))
+  }, [library])
+
+  useEffect(() => {
+    const url = library ? `/api/contexts?library=${encodeURIComponent(library)}` : "/api/contexts"
+    fetch(url)
+      .then((r) => r.json())
+      .then((j) => setExistingContexts(j.contexts || []))
+      .catch(() => setExistingContexts([]))
   }, [library])
 
   async function saveTags(nextTags: string[]) {
@@ -98,6 +116,38 @@ export function PaperDetail({
       setTagError(e.message || "Failed to save tags")
     } finally {
       setSavingTags(false)
+    }
+  }
+
+  async function saveContexts(nextContexts: string[]) {
+    setSavingContexts(true)
+    setContextError(null)
+    try {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/contexts?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/contexts`
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contexts: nextContexts }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to save contexts")
+      }
+      const j = await r.json()
+      if (j?.paper) {
+        onUpdatePaper?.(j.paper)
+        setContexts(Array.isArray(j.paper.contexts)
+          ? j.paper.contexts
+          : Array.isArray(j.paper.projects)
+            ? j.paper.projects
+            : nextContexts)
+      }
+    } catch (e: any) {
+      setContextError(e.message || "Failed to save contexts")
+    } finally {
+      setSavingContexts(false)
     }
   }
 
@@ -409,6 +459,72 @@ export function PaperDetail({
                 </datalist>
               </div>
               {tagError && <div className="text-xs text-rose-500 mt-1">{tagError}</div>}
+            </div>
+
+            <div className="mt-2">
+              <div className="text-sm font-semibold mb-1">Contexts</div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {contexts.length === 0 && (
+                  <span className="text-xs text-zinc-500">No contexts yet</span>
+                )}
+                {contexts.map((c) => (
+                  <span key={c} className="px-2 py-0.5 rounded text-xs" style={tagColor(c)}>
+                    {c}
+                    <button
+                      className="ml-1 text-xs"
+                      onClick={() => {
+                        const next = contexts.filter((x) => x !== c)
+                        setContexts(next)
+                        saveContexts(next)
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full max-w-xs bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  placeholder="Add context"
+                  list="context-suggestions"
+                  value={contextInput}
+                  onChange={(e) => setContextInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      const clean = contextInput.trim().toLowerCase()
+                      if (clean && !contexts.includes(clean)) {
+                        const next = [...contexts, clean]
+                        setContexts(next)
+                        saveContexts(next)
+                        setContextInput("")
+                      }
+                    }
+                  }}
+                />
+                <button
+                  className="px-3 py-1 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-900 transition-colors disabled:opacity-50"
+                  onClick={() => {
+                    const clean = contextInput.trim().toLowerCase()
+                    if (clean && !contexts.includes(clean)) {
+                      const next = [...contexts, clean]
+                      setContexts(next)
+                      saveContexts(next)
+                      setContextInput("")
+                    }
+                  }}
+                  disabled={savingContexts}
+                >
+                  Add
+                </button>
+                <datalist id="context-suggestions">
+                  {existingContexts.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </div>
+              {contextError && <div className="text-xs text-rose-500 mt-1">{contextError}</div>}
             </div>
 
             <div className="mt-3">

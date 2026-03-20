@@ -51,6 +51,7 @@ export default function App() {
   const libsDropdownRef = useRef<HTMLDivElement>(null)
   const tabsContainerRef = useRef<HTMLDivElement>(null)
   const tagDropdownRef = useRef<HTMLDivElement>(null)
+  const contextDropdownRef = useRef<HTMLDivElement>(null)
   const [tabsOverflowOpen, setTabsOverflowOpen] = useState(false)
   const [tabsContainerWidth, setTabsContainerWidth] = useState(0)
   const { theme, setTheme } = useTheme()
@@ -79,12 +80,15 @@ export default function App() {
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [paperSearch, setPaperSearch] = useState("")
   const [paperTagFilter, setPaperTagFilter] = useState<string[]>([])
+  const [paperContextFilter, setPaperContextFilter] = useState<string[]>([])
   const [paperReadFilter, setPaperReadFilter] = useState<string[]>([])
   const [paperSortKey, setPaperSortKey] = useState<"title" | "year" | "authors" | null>(null)
   const [paperSortDir, setPaperSortDir] = useState<"asc" | "desc">("asc")
   const [showFilters, setShowFilters] = useState(false)
   const [tagSearch, setTagSearch] = useState("")
   const [showTagDropdown, setShowTagDropdown] = useState(false)
+  const [contextSearch, setContextSearch] = useState("")
+  const [showContextDropdown, setShowContextDropdown] = useState(false)
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(() => new Set())
   const [exportBibStatus, setExportBibStatus] = useState<string | null>(null)
   const [exportBibMode, setExportBibMode] = useState(false)
@@ -152,12 +156,15 @@ export default function App() {
     setActiveTab("__papers__")
     setPaperSearch("")
     setPaperTagFilter([])
+    setPaperContextFilter([])
     setPaperReadFilter([])
     setPaperSortKey(null)
     setPaperSortDir("asc")
     setShowFilters(false)
     setTagSearch("")
     setShowTagDropdown(false)
+    setContextSearch("")
+    setShowContextDropdown(false)
     setSelectedPaperIds(new Set())
     setExportBibStatus(null)
     setExportBibMode(false)
@@ -165,7 +172,10 @@ export default function App() {
   }, [library])
 
   useEffect(() => {
-    if (!showFilters) setShowTagDropdown(false)
+    if (!showFilters) {
+      setShowTagDropdown(false)
+      setShowContextDropdown(false)
+    }
   }, [showFilters])
 
   useEffect(() => {
@@ -241,6 +251,25 @@ export default function App() {
       document.removeEventListener("mousedown", handleClickOutside)
     }
   }, [showTagDropdown])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        contextDropdownRef.current &&
+        !contextDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowContextDropdown(false)
+      }
+    }
+    if (showContextDropdown) {
+      document.addEventListener("mousedown", handleClickOutside)
+    } else {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [showContextDropdown])
 
   useEffect(() => {
     function handleResize() {
@@ -324,10 +353,30 @@ export default function App() {
     return availableTags.filter((t) => t.includes(q))
   }, [availableTags, tagSearch])
 
+  const availableContexts = useMemo(() => {
+    const contexts = new Set<string>()
+    papers.forEach((p) => {
+      const list = Array.isArray(p.contexts) ? p.contexts : []
+      list
+        .filter((t: string) => typeof t === "string")
+        .map((t: string) => t.trim().toLowerCase())
+        .filter(Boolean)
+        .forEach((t: string) => contexts.add(t))
+    })
+    return Array.from(contexts).sort()
+  }, [papers])
+
+  const visibleContexts = useMemo(() => {
+    const q = contextSearch.trim().toLowerCase()
+    if (!q) return availableContexts
+    return availableContexts.filter((t) => t.includes(q))
+  }, [availableContexts, contextSearch])
+
   const filteredPapers = useMemo(() => {
     const q = paperSearch.trim().toLowerCase()
     const terms = q.split(/\s+/).filter(Boolean)
     const hasTagFilter = paperTagFilter.length > 0
+    const hasContextFilter = paperContextFilter.length > 0
     const hasReadFilter = paperReadFilter.length > 0
     return papers.filter((p) => {
       const title = (p.title || "").toString().toLowerCase()
@@ -344,13 +393,25 @@ export default function App() {
         if (!paperReadFilter.includes(state)) return false
       }
 
-      if (!hasTagFilter) return true
-      const tags = Array.isArray(p.tags)
-        ? p.tags.map((t) => t.toLowerCase())
-        : []
-      return paperTagFilter.some((t) => tags.includes(t))
+      if (hasTagFilter) {
+        const tags = Array.isArray(p.tags)
+          ? p.tags.map((t) => t.toLowerCase())
+          : []
+        if (!paperTagFilter.some((t) => tags.includes(t))) return false
+      }
+
+      if (hasContextFilter) {
+        const contexts = Array.isArray(p.contexts)
+          ? p.contexts.map((t) => t.toLowerCase())
+          : Array.isArray((p as any).projects)
+            ? (p as any).projects.map((t: string) => t.toLowerCase())
+            : []
+        if (!paperContextFilter.some((t) => contexts.includes(t))) return false
+      }
+
+      return true
     })
-  }, [papers, paperSearch, paperTagFilter, paperReadFilter])
+  }, [papers, paperSearch, paperTagFilter, paperContextFilter, paperReadFilter])
 
   const sortedPapers = useMemo(() => {
     if (!paperSortKey) return filteredPapers
@@ -570,7 +631,7 @@ export default function App() {
       <header className="w-full px-6 py-4 flex justify-between items-center bg-white/80 dark:bg-zinc-900/80 shadow-sm border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <span className="text-2xl mr-2" aria-label="Aurora">🌌</span>
-          <h1 className="text-3xl font-bold text-aurora-500 dark:text-aurora-400 m-0">Galatea</h1>
+          <h1 className="text-3xl font-bold text-aurora-500 dark:text-aurora-400 m-0">Aurora-Lib</h1>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative" ref={libsDropdownRef}>
@@ -858,6 +919,35 @@ export default function App() {
                     ))}
                   </div>
 
+                  <div className="flex items-center justify-between mt-3">
+                    <label className="text-sm font-medium">Filter by contexts</label>
+                    {paperContextFilter.length > 0 && (
+                      <button
+                        className="text-sm text-aurora-600 hover:text-aurora-700"
+                        onClick={() => setPaperContextFilter([])}
+                      >
+                        Clear contexts
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {paperContextFilter.length === 0 && (
+                      <span className="text-sm text-zinc-500">No contexts selected</span>
+                    )}
+                    {paperContextFilter.map((context) => (
+                      <button
+                        key={context}
+                        className="px-2 py-1 rounded text-sm border border-transparent"
+                        style={tagColor(context)}
+                        onClick={() => setPaperContextFilter((prev) => prev.filter((c) => c !== context))}
+                        title="Remove context"
+                      >
+                        {context}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="relative" ref={tagDropdownRef}>
                     <input
                       className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 w-full"
@@ -892,6 +982,49 @@ export default function App() {
                               <span className="flex items-center gap-2">
                                 <span className="inline-block w-3 h-3 rounded" style={tagColor(tag)} />
                                 {tag}
+                              </span>
+                              {active && <span className="text-xs text-aurora-600">Selected</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative" ref={contextDropdownRef}>
+                    <input
+                      className="border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 w-full"
+                      placeholder="Search contexts"
+                      value={contextSearch}
+                      onFocus={() => setShowContextDropdown(true)}
+                      onChange={(e) => {
+                        setContextSearch(e.target.value)
+                        setShowContextDropdown(true)
+                      }}
+                    />
+
+                    {showContextDropdown && (
+                      <div className="absolute z-20 mt-2 w-full max-h-44 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 shadow-lg">
+                        {visibleContexts.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-zinc-500">No contexts</div>
+                        )}
+                        {visibleContexts.map((context) => {
+                          const active = paperContextFilter.includes(context)
+                          return (
+                            <button
+                              key={context}
+                              className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                                active ? "bg-aurora-50 dark:bg-aurora-900" : ""
+                              }`}
+                              onClick={() =>
+                                setPaperContextFilter((prev) =>
+                                  active ? prev.filter((c) => c !== context) : [...prev, context]
+                                )
+                              }
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="inline-block w-3 h-3 rounded" style={tagColor(context)} />
+                                {context}
                               </span>
                               {active && <span className="text-xs text-aurora-600">Selected</span>}
                             </button>
@@ -1249,7 +1382,7 @@ export default function App() {
                         Add papers with the “Add paper” button; tabs keep paper details open while you browse.
                       </li>
                       <li>
-                        Tags and reading state are editable in the paper detail view.
+                        Tags, contexts, and reading state are editable in the paper detail view.
                       </li>
                       <li>
                         Use the Notes button to open your Obsidian vault.
