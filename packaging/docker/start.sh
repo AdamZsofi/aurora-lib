@@ -27,6 +27,7 @@ DOCKER_RUN_ARGS+=(
   -v "${HOST_LIBRARY_PATH}:/data"
   -e "AURORA_DEFAULT_VAULT=/data"
   -e "AURORA_SINGLE_LIBRARY=1"
+  -e "AURORA_DOCKER=1"
 )
 
 docker run "${DOCKER_RUN_ARGS[@]}" "${IMAGE_NAME}"

@@ -1,55 +1,94 @@
-Aurora Lib is a lightweight UI and manager for your papis library and obsidian vault.
+> **Disclaimer:** A significant portion of this codebase is AI-generated and not yet thoroughly tested. Please treat it as evolving software.
 
-## Quickstart
+Aurora Lib is a local-first web UI for managing a papis library inside an Obsidian vault.
 
-### Backend (dervice)
+## Main features
+
+- **Library management**
+    - Manage papers from a browser UI backed by papis.
+    - Add papers with minimal work via DOI (single) or BibTeX (batch), with (optional) PDF upload.
+    - Edit metadata in-app (title/authors/year/DOI) and attach or replace PDFs.
+    - Batch-select papers and export BibTeX for selected entries.
+- **Discovery and organization**
+    - DOI metadata resolution with Crossref + DataCite fallback.
+    - Automatic OpenAlex keyword/tag enrichment (editable).
+    - Quick link-out to Inciteful from paper detail views.
+    - Read-state tracking, tags, contexts/projects, advanced filtering, and column sorting.
+- **Obsidian workflow**
+    - Obsidian note integration with synchronized paper metadata and PDF links.
+    - Multiple paper detail tabs and restored UI state between sessions.
+- **File-based by design**
+    - Works directly on files in your vault (no separate database service).
+    - papis metadata is stored as YAML (for example `info.yaml`) alongside document files.
+    - Notes are standard Markdown files.
+    - Portable, readable, and version-control friendly.
+
+### Obsidian recommendations
+
+- If you are new to Obsidian, this getting-started guide is a good overview: [Getting started with Obsidian](https://obsidian.rocks/getting-started-with-obsidian-a-beginners-guide/).
+- For syncing a vault with Git (including Android workflows), the Obsidian Git plugin is recommended. 
+    - Practical mobile notes: [Obsidian Android syncing via GitHub](https://www.reddit.com/r/ObsidianMD/comments/17odzjb/obsidian_android_syncing_via_github_in_2023/).
+- For reading and annotating PDFs inside Obsidian, PDF++ is recommended.
+
+## Install options
+
+### Linux user service (recommended)
+
+See [packaging/README.md](packaging/README.md) and run:
+
+```
+./packaging/install.sh
+```
+
+### Docker
+
+Start:
+
+```
+./packaging/docker/start.sh /absolute/path/to/vault
+```
+
+Stop:
+
+```
+./packaging/docker/stop.sh
+```
+
+Notes for Docker mode:
+- Single-vault mode is enforced.
+- Server-side “Open PDF” is disabled in Docker mode.
+
+## Architecture
+
+- FastAPI + Uvicorn backend exposes paper/library/metadata/note endpoints.
+- React + TypeScript UI consumes backend APIs.
+- Data is stored in papis document folders inside the selected vault.
+
+## Metadata sources
+
+- Primary DOI resolution: Crossref (via papis).
+- Fallback DOI resolution: DataCite.
+- Keyword/tag enrichment: OpenAlex.
+
+OpenAlex tags are best-effort and can be edited manually in the UI.
+
+## Quickstart for development
+
+### Backend
+
 ```
 ./scripts/ensure-venv.sh
 source .venv/bin/activate
-cd service
-pip install -r requirements.txt
+pip install -r service/requirements.txt
+uvicorn service.main:app --reload --port 5173
 ```
 
-```
-source .venv/bin/activate
-uvicorn main:app --reload --port 8000 --app-dir service
-```
+### Frontend (optional in dev)
 
-## Frontend
+If you want Vite hot reload for frontend work:
 
 ```
 cd web-ui
 npm install
 npm run dev
 ```
-
-*(or, after everything else is set up, launch.json is available to start from vs code)*
-
-## Architecture
-
-Although I kept the web UI, it's important to emphasize that the project is developed to be run locally and to be accessed on localhost.
-
-A local FastAPI backend (Uvicorn) exposes HTTP endpoints to manage Papis libraries, fetch metadata (Crossref/OpenAlex), and serve PDFs. A React Vite frontend calls those endpoints from the browser to list, add, and manage papers, tags, notes, and PDFs. Data lives in local Papis libraries (git-backed), with optional sample JSON fallback.
-
-### Main libraries
-
-FastAPI: HTTP API server exposing paper/library operations.
-Uvicorn: ASGI server running the FastAPI app locally.
-Papis: Core library/database for managing local reference libraries.
-React: UI framework for the web frontend.
-Vite: Frontend dev server and build tool.
-TypeScript: Type-safe frontend codebase.
-python-multipart: Handles file uploads (PDFs/BibTeX) in the API.
-
-### Data Fetching
-
-Mostly we just fetch crossref. But tags are from OpenAlex, which are fairly experimental, so keep an eye on them (you can remove and add tags manually as well).
-
-### Feature TODOs
-
-- package project: docker?
-- bibtex export
-- filter by tag or other keywords
-- better collaboration (e.g., "read" statuses for several people)
-
-*(also, lots of testing needed)*

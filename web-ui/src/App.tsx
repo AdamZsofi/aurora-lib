@@ -95,6 +95,7 @@ export default function App() {
   const [setupMode, setSetupMode] = useState<"create" | "import">("create")
   const [needsSetup, setNeedsSetup] = useState(false)
   const [singleLibrary, setSingleLibrary] = useState(false)
+  const [dockerMode, setDockerMode] = useState(false)
   const [defaultVaultPath, setDefaultVaultPath] = useState<string | null>(null)
 
   useEffect(() => {
@@ -107,6 +108,7 @@ export default function App() {
       .then((r) => r.json())
       .then((j) => {
         setSingleLibrary(Boolean(j?.single_library))
+        setDockerMode(Boolean(j?.docker_mode))
         setDefaultVaultPath(j?.default_vault || null)
         if (j?.configured && j?.config?.library_name) {
           setLibrary(j.config.library_name)
@@ -124,6 +126,7 @@ export default function App() {
       .catch(() => {
         setLibrary(null)
         setNeedsSetup(true)
+        setDockerMode(false)
       })
   }, [])
 
@@ -1040,6 +1043,7 @@ export default function App() {
               <PapersTable
                 papers={sortedPapers}
                 library={library}
+                hideOpenPdf={dockerMode}
                 selectedIds={selectedPaperIds}
                 showSelection={exportBibMode}
                 sortKey={paperSortKey}
@@ -1102,6 +1106,7 @@ export default function App() {
                 id={tab.id}
                 paper={paperCache[tab.id] ?? null}
                 loading={paperLoading[tab.id] ?? false}
+                hideOpenPdf={dockerMode}
                 onClose={() => {
                   setTabs(tabs => tabs.filter(t => t.id !== tab.id))
                   setActiveTab("__papers__")

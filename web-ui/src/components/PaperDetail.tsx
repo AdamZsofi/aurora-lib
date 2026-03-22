@@ -6,6 +6,7 @@ type PaperDetailProps = {
   id: string
   paper: any | null
   loading: boolean
+  hideOpenPdf?: boolean
   onClose: () => void
   onRefresh: () => void
   onUpdatePaper?: (paper: any) => void
@@ -16,6 +17,7 @@ export function PaperDetail({
   id,
   paper,
   loading,
+  hideOpenPdf,
   onClose,
   onRefresh,
   onUpdatePaper,
@@ -300,7 +302,7 @@ export function PaperDetail({
       <div className="flex justify-between items-center mb-2">
         <h2 className="text-xl font-bold">Paper detail</h2>
         <div className="flex gap-2">
-          {pdfExists && (
+          {!hideOpenPdf && pdfExists && (
             <button
               className="px-1.5 py-1 rounded bg-aurora-400 text-white font-semibold shadow-sm transition-colors hover:bg-aurora-700"
               onClick={handleOpenPdf}

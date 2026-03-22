@@ -53,6 +53,9 @@ os.environ["PAPIS_CONFIG_DIR"] = str(AURORA_PAPIS_CONFIG_DIR)
 def _is_single_library_mode() -> bool:
     return os.environ.get("AURORA_SINGLE_LIBRARY", "").lower() in {"1", "true", "yes", "on"}
 
+def _is_docker_mode() -> bool:
+    return os.environ.get("AURORA_DOCKER", "").lower() in {"1", "true", "yes", "on"}
+
 def _single_library_vault_path() -> Optional[Path]:
     if not _is_single_library_mode():
         return None
@@ -88,8 +91,17 @@ def _bootstrap_from_env() -> None:
         return
 
     data = _load_aurora_config()
-    if data.get("vault_path"):
-        return
+    existing_vault = data.get("vault_path") if isinstance(data, dict) else None
+    if isinstance(existing_vault, str) and existing_vault.strip():
+        try:
+            existing_path = Path(existing_vault).expanduser().resolve()
+        except Exception:
+            existing_path = None
+        if existing_path == vault_path:
+            return
+        # In single-library / docker mode, always prefer the configured env vault.
+        if not (_is_single_library_mode() or _is_docker_mode()):
+            return
 
     vault_cfg = _load_vault_config(vault_path) or {}
     library_uuid = vault_cfg.get("library_uuid")
@@ -103,7 +115,14 @@ def _bootstrap_from_env() -> None:
 
     base_library_name = vault_cfg.get("library_name") or os.environ.get("AURORA_DEFAULT_LIBRARY") or "paper-lib"
     library_name = _with_library_hash(base_library_name, library_uuid)
-    library_dir_name = vault_cfg.get("library_dir") or safe_filename(library_name) or "paper-lib"
+    default_dir_name = safe_filename(base_library_name) or "paper-lib"
+    if isinstance(vault_cfg.get("library_dir"), str) and vault_cfg.get("library_dir"):
+        library_dir_name = str(vault_cfg.get("library_dir"))
+    elif (vault_path / default_dir_name).exists():
+        # Backward-compatible: if an existing plain folder is present (e.g. paper-lib), use it.
+        library_dir_name = default_dir_name
+    else:
+        library_dir_name = safe_filename(library_name) or "paper-lib"
     library_path = vault_path / library_dir_name
     notes_path = _ensure_obsidian_dirs(vault_path)
     library_path.mkdir(parents=True, exist_ok=True)
@@ -481,17 +500,20 @@ def get_current_library():
 def get_aurora_config():
     data = _load_aurora_config()
     single_mode = _is_single_library_mode()
+    docker_mode = _is_docker_mode()
     single_path = _single_library_vault_path()
     if not data:
         return {
             "configured": False,
             "single_library": single_mode,
+            "docker_mode": docker_mode,
             "default_vault": str(single_path) if single_path else None,
         }
     return {
         "configured": True,
         "config": data,
         "single_library": single_mode,
+        "docker_mode": docker_mode,
         "default_vault": str(single_path) if single_path else None,
     }
 
@@ -1629,6 +1651,8 @@ def get_pdf(paper_id: str, variant: str = "clean", library: Optional[str] = None
 
 @app.post("/api/papers/{paper_id}/pdf/open")
 def open_pdf(paper_id: str, library: Optional[str] = None):
+    if _is_docker_mode():
+        raise HTTPException(status_code=400, detail="Open PDF is disabled in Docker mode")
     try:
         _set_library_from_param(library)
         from papis.database import get_database

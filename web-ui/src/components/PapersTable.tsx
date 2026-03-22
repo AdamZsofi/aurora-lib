@@ -9,6 +9,7 @@ export function PapersTable({
   onToggleSelect,
   onToggleSelectAll,
   showSelection,
+  hideOpenPdf,
   sortKey,
   sortDir,
   onSort,
@@ -20,6 +21,7 @@ export function PapersTable({
   onToggleSelect: (id: string, checked: boolean) => void
   onToggleSelectAll: (checked: boolean) => void
   showSelection: boolean
+  hideOpenPdf?: boolean
   sortKey: "title" | "year" | "authors" | null
   sortDir: "asc" | "desc"
   onSort: (key: "title" | "year" | "authors") => void
@@ -120,7 +122,7 @@ export function PapersTable({
             {/*<td className="px-3 py-2">{p.id}</td>*/}
             <td className="px-3 py-2">
               <div className="flex items-center gap-2">
-                {(Array.isArray(p.files)
+                {!hideOpenPdf && (Array.isArray(p.files)
                   ? p.files.some((f) => f.toLowerCase().endsWith(".pdf"))
                   : false) && (
                   <button

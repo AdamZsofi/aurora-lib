@@ -49,7 +49,13 @@ Stop:
 
 ./packaging/docker/stop.sh
 
+Persist across reboots (untested):
+
+docker update --restart unless-stopped aurora-lib
+
 Notes:
 
 - The mounted path is treated as the Obsidian vault (or to-be-created vault).
 - Only one vault can be active when using the Docker setup (single mount at /data).
+- "Open PDF" is disabled in Docker mode (server-side desktop opening is not available in containers).
+- The restart policy command above is currently untested.
