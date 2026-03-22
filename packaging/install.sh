@@ -35,17 +35,24 @@ cat "${ROOT_DIR}/packaging/systemd/aurora-lib.service.template" \
 
 AUTOSTART_DIR="${HOME}/.config/autostart"
 AUTOSTART_FILE="${AUTOSTART_DIR}/aurora-lib-env.desktop"
+AUTOSTART_SCRIPT="${AURORA_CONF_DIR}/import-env-and-restart.sh"
 mkdir -p "${AUTOSTART_DIR}"
-if [[ ! -f "${AUTOSTART_FILE}" ]]; then
-  cat > "${AUTOSTART_FILE}" <<'EOF'
+cat > "${AUTOSTART_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH || true
+systemctl --user restart aurora-lib.service || true
+EOF
+chmod +x "${AUTOSTART_SCRIPT}"
+
+cat > "${AUTOSTART_FILE}" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Aurora Lib Env Import
-Exec=systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH && systemctl --user restart aurora-lib
+Exec=${AUTOSTART_SCRIPT}
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
-fi
 
 systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH
 systemctl --user daemon-reload
