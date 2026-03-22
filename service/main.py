@@ -1414,6 +1414,64 @@ def _normalize_doi(doi: str) -> str:
             return value
     return value
 
+def _normalize_single_author(name: str) -> str:
+    value = (name or "").strip()
+    if not value:
+        return ""
+    value = re.sub(r"\s+", " ", value)
+    if "," in value:
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        if len(parts) >= 2:
+            family = parts[0]
+            given = " ".join(parts[1:])
+            return " ".join([given, family]).strip()
+    return value
+
+def _split_author_names(raw: str) -> list[str]:
+    value = (raw or "").strip()
+    if not value:
+        return []
+    value = re.sub(r"\s+", " ", value)
+    parts = re.split(r"\s+(?:and|&)\s+|;|\|", value)
+    if len(parts) > 1:
+        names = [_normalize_single_author(p) for p in parts if p.strip()]
+        return [n for n in names if n]
+
+    if "," in value:
+        comma_parts = [p.strip() for p in value.split(",") if p.strip()]
+        if len(comma_parts) >= 4 and len(comma_parts) % 2 == 0:
+            names = []
+            for i in range(0, len(comma_parts), 2):
+                family = comma_parts[i]
+                given = comma_parts[i + 1]
+                names.append(_normalize_single_author(f"{family}, {given}"))
+            return [n for n in names if n]
+
+        names = [_normalize_single_author(p) for p in comma_parts]
+        return [n for n in names if n]
+
+    return [_normalize_single_author(value)]
+
+def _author_list_from_names(names: list[str]) -> list[dict]:
+    out = []
+    for name in names:
+        if not name:
+            continue
+        value = name.strip()
+        if "," in value:
+            parts = [p.strip() for p in value.split(",") if p.strip()]
+            if len(parts) >= 2:
+                family = parts[0]
+                given = " ".join(parts[1:])
+                out.append({"given": given, "family": family})
+                continue
+        tokens = value.split()
+        if len(tokens) == 1:
+            out.append({"family": tokens[0]})
+        else:
+            out.append({"given": " ".join(tokens[:-1]), "family": tokens[-1]})
+    return out
+
 def _datacite_doi_to_data(doi: str) -> dict:
     """Resolve a DOI using DataCite API and map to papis-like metadata."""
     doi = _normalize_doi(doi)
@@ -1485,6 +1543,13 @@ def add_paper(
     elif isinstance(meta.get("projects"), list):
         raw_meta_projects = meta.get("projects") or []
         meta["contexts"] = [c for c in (_normalize_tag(x) for x in raw_meta_projects) if c]
+
+    if isinstance(meta.get("author"), str):
+        names = _split_author_names(meta.get("author"))
+        if names:
+            meta["author"] = " and ".join(names)
+            if not isinstance(meta.get("author_list"), list):
+                meta["author_list"] = _author_list_from_names(names)
 
     file_path = None
     if file is not None:
