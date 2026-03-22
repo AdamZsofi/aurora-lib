@@ -30,6 +30,7 @@ export function AddPaper({
   library?: string | null
 }) {
   const [mode, setMode] = useState<"single" | "batch">("single")
+  const [singleMode, setSingleMode] = useState<"doi" | "manual">("doi")
 
   // Single add
   const [doi, setDoi] = useState("")
@@ -44,6 +45,11 @@ export function AddPaper({
   const [existingContexts, setExistingContexts] = useState<string[]>([])
   const [contextInput, setContextInput] = useState("")
   const [selectedContexts, setSelectedContexts] = useState<string[]>([])
+  const [manualTitle, setManualTitle] = useState("")
+  const [manualAuthors, setManualAuthors] = useState("")
+  const [manualYear, setManualYear] = useState("")
+  const [manualDoi, setManualDoi] = useState("")
+  const [manualUrl, setManualUrl] = useState("")
 
   // Batch add
   const [bibFile, setBibFile] = useState<File | null>(null)
@@ -80,6 +86,40 @@ export function AddPaper({
     if (!current.includes(clean)) setTags([...current, clean])
   }
 
+  function setPdfFromDrop(file: File | null) {
+    if (!file) return
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setStatus("Only PDF files are supported")
+      return
+    }
+    setFile(file)
+    setStatus(null)
+  }
+
+  function setBatchPdfFromDrop(itemId: string, file: File | null) {
+    if (!file) return
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setBatchStatus("Only PDF files are supported")
+      return
+    }
+    setBatchItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, file } : i)))
+  }
+
+  function buildManualMetadata() {
+    const meta: any = {
+      title: manualTitle.trim(),
+      author: manualAuthors.trim(),
+      year: manualYear.trim(),
+      doi: manualDoi.trim(),
+      url: manualUrl.trim(),
+      source: "manual",
+    }
+    Object.keys(meta).forEach((k) => {
+      if (meta[k] === "") delete meta[k]
+    })
+    return meta
+  }
+
   async function fetchMeta() {
     setStatus("fetching")
     setMetadata(null)
@@ -107,13 +147,21 @@ export function AddPaper({
   }
 
   async function submitAdd() {
-    if (!metadata) return
+    let metaToSend = metadata
+    if (singleMode === "manual") {
+      metaToSend = buildManualMetadata()
+      if (!metaToSend?.title) {
+        setStatus("Title is required")
+        return
+      }
+    }
+    if (!metaToSend) return
     setStatus("adding")
     try {
       const form = new FormData()
       const metaWithTags = selectedTags.length
-        ? { ...metadata, tags: Array.from(new Set([...(metadata.tags || []), ...selectedTags])) }
-        : metadata
+        ? { ...metaToSend, tags: Array.from(new Set([...(metaToSend.tags || []), ...selectedTags])) }
+        : metaToSend
       const metaWithContexts = selectedContexts.length
         ? { ...metaWithTags, contexts: Array.from(new Set([...(metaWithTags.contexts || []), ...selectedContexts])) }
         : metaWithTags
@@ -345,6 +393,29 @@ export function AddPaper({
       {mode === "single" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2">
           <div className="min-w-0">
+            <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2 mb-3">
+              <button
+                className={`px-3 py-1 rounded ${singleMode === "doi" ? "bg-aurora-600 text-white" : "bg-zinc-100 dark:bg-zinc-800"}`}
+                onClick={() => {
+                  setSingleMode("doi")
+                  setStatus(null)
+                }}
+              >
+                DOI lookup
+              </button>
+              <button
+                className={`px-3 py-1 rounded ${singleMode === "manual" ? "bg-aurora-600 text-white" : "bg-zinc-100 dark:bg-zinc-800"}`}
+                onClick={() => {
+                  setSingleMode("manual")
+                  setMetadata(null)
+                  setStatus(null)
+                }}
+              >
+                Manual entry (no DOI)
+              </button>
+            </div>
+
+            {singleMode === "doi" && (
             <div className="mb-2 flex flex-col sm:flex-row sm:items-center gap-2">
               <label className="flex items-center gap-2 w-full">
                 DOI:
@@ -366,8 +437,60 @@ export function AddPaper({
                 Fetch metadata
               </button>
             </div>
+            )}
 
-            {metadata && (
+            {singleMode === "manual" && (
+              <div className="mb-2 grid grid-cols-1 gap-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm">Title *</span>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    value={manualTitle}
+                    onChange={(e) => {
+                      setManualTitle(e.target.value)
+                      setStatus(null)
+                    }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm">Authors</span>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    placeholder="e.g. Ada Lovelace and Alan Turing"
+                    value={manualAuthors}
+                    onChange={(e) => setManualAuthors(e.target.value)}
+                  />
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-sm">Year</span>
+                    <input
+                      className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                      value={manualYear}
+                      onChange={(e) => setManualYear(e.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-sm">DOI (optional)</span>
+                    <input
+                      className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                      value={manualDoi}
+                      onChange={(e) => setManualDoi(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm">URL (optional)</span>
+                  <input
+                    className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                    value={manualUrl}
+                    onChange={(e) => setManualUrl(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+
+            {singleMode === "doi" && metadata && (
               <div className="mb-2 p-3 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800">
                 <div className="font-semibold">{metaSummary(metadata).title}</div>
                 <div className="text-sm text-zinc-500">
@@ -481,7 +604,7 @@ export function AddPaper({
               )}
             </div>
 
-            {metadata && (
+            {singleMode === "doi" && metadata && (
               <div className="mb-2">
                 <button
                   className="text-sm text-aurora-700 hover:underline"
@@ -501,7 +624,7 @@ export function AddPaper({
               <button
                 className="px-4 py-2 rounded bg-aurora-700 text-white font-semibold shadow hover:bg-aurora-800 transition-colors disabled:opacity-50"
                 onClick={submitAdd}
-                disabled={!metadata}
+                disabled={singleMode === "doi" && !metadata}
               >
                 Add to library
               </button>
@@ -514,7 +637,14 @@ export function AddPaper({
 
           <div className="min-w-0">
             <div className="mb-2">
-              <div className="flex items-center gap-3">
+              <div
+                className="flex items-center gap-3"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setPdfFromDrop(e.dataTransfer.files?.[0] ?? null)
+                }}
+              >
                 <span className="text-sm">Optional PDF:</span>
                 <label className="px-3 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer">
                   <input
@@ -529,7 +659,7 @@ export function AddPaper({
                   <span className="text-xs text-zinc-500 truncate max-w-60">{file.name}</span>
                 )}
               </div>
-              <div className="text-xs text-zinc-500 mt-1">You can add a PDF now or later.</div>
+              <div className="text-xs text-zinc-500 mt-1">You can add a PDF now or later. Drag & drop a PDF here.</div>
             </div>
             {filePreviewUrl && (
               <iframe
@@ -728,7 +858,14 @@ export function AddPaper({
 
                 {item.ok && (
                   <div className="mt-2 flex flex-wrap items-center gap-3">
-                    <label className="px-2 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer text-xs">
+                    <label
+                      className="px-2 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer text-xs"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        setBatchPdfFromDrop(item.id, e.dataTransfer.files?.[0] ?? null)
+                      }}
+                    >
                       <input
                         type="file"
                         accept="application/pdf"
