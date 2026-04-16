@@ -7,6 +7,7 @@ import { LibsPanel } from "./components/LibsPanel"
 import { AddPaper } from "./components/AddPaper"
 import { PaperDetail } from "./components/PaperDetail"
 import { tagColor } from "./utils/tags"
+import { READ_STATE_OPTIONS } from "./utils/readState"
 
 export default function App() {
   const defaultTabs = [{ id: "__papers__", title: "📚" }]
@@ -446,6 +447,38 @@ export default function App() {
     })
   }, [filteredPapers, paperSortKey, paperSortDir])
 
+  async function updateReadState(id: string, state: string) {
+    if (!id) return
+    try {
+      const url = library
+        ? `/api/papers/${encodeURIComponent(id)}/state?library=${encodeURIComponent(library)}`
+        : `/api/papers/${encodeURIComponent(id)}/state`
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail || "Failed to update reading status")
+      }
+      setPapers((prev) =>
+        prev.map((p) =>
+          (p.id || p.ref || "") === id
+            ? { ...p, read_state: state, raw: { ...p.raw, aurora_read_state: state } }
+            : p
+        )
+      )
+      setPaperCache((prev) =>
+        prev[id]
+          ? { ...prev, [id]: { ...prev[id], read_state: state, raw: { ...prev[id].raw, aurora_read_state: state } } }
+          : prev
+      )
+    } catch (e: any) {
+      alert(e.message || "Failed to update reading status")
+    }
+  }
+
   async function exportSelectedBib() {
     if (selectedPaperIds.size === 0) return
     setExportBibStatus(null)
@@ -863,14 +896,7 @@ export default function App() {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {[
-                      { value: "unread", label: "⚪ Unread" },
-                      { value: "want_to_read", label: "⭐ Want to read" },
-                      { value: "reading", label: "📖 Reading" },
-                      { value: "read_abstract", label: "📄 Read: abstract" },
-                      { value: "read_shallow", label: "📘 Read: shallow" },
-                      { value: "read_deep", label: "📚 Read: deep" },
-                    ].map((o) => {
+                    {READ_STATE_OPTIONS.map((o) => {
                       const active = paperReadFilter.includes(o.value)
                       return (
                         <button
@@ -886,7 +912,7 @@ export default function App() {
                             )
                           }
                         >
-                          {o.label}
+                          {o.emoji} {o.label}
                         </button>
                       )
                     })}
@@ -1082,6 +1108,7 @@ export default function App() {
                     return next
                   })
                 }}
+                onUpdateReadState={updateReadState}
                 onSelect={(id) => {
                   // Open a new tab for this paper if not already open
                   setTabs(tabs => {

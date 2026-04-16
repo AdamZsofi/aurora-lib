@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { tagColor } from "../utils/tags"
+import { READ_STATE_OPTIONS } from "../utils/readState"
 
 type BatchItem = {
   id: string
@@ -50,6 +51,7 @@ export function AddPaper({
   const [manualYear, setManualYear] = useState("")
   const [manualDoi, setManualDoi] = useState("")
   const [manualUrl, setManualUrl] = useState("")
+  const [selectedReadState, setSelectedReadState] = useState("unread")
 
   // Batch add
   const [bibFile, setBibFile] = useState<File | null>(null)
@@ -60,6 +62,7 @@ export function AddPaper({
   const [batchTags, setBatchTags] = useState<string[]>([])
   const [batchContextInput, setBatchContextInput] = useState("")
   const [batchContexts, setBatchContexts] = useState<string[]>([])
+  const [batchReadState, setBatchReadState] = useState("unread")
 
   function metaSummary(meta: any) {
     const rawTitle = meta?.title || meta?.message?.title || "(no title)"
@@ -112,6 +115,7 @@ export function AddPaper({
       year: manualYear.trim(),
       doi: manualDoi.trim(),
       url: manualUrl.trim(),
+      aurora_read_state: selectedReadState,
       source: "manual",
     }
     Object.keys(meta).forEach((k) => {
@@ -165,7 +169,11 @@ export function AddPaper({
       const metaWithContexts = selectedContexts.length
         ? { ...metaWithTags, contexts: Array.from(new Set([...(metaWithTags.contexts || []), ...selectedContexts])) }
         : metaWithTags
-      form.append("metadata", JSON.stringify(metaWithContexts))
+      const metaWithReadState = {
+        ...metaWithContexts,
+        aurora_read_state: selectedReadState,
+      }
+      form.append("metadata", JSON.stringify(metaWithReadState))
       if (file) form.append("file", file)
 
       const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
@@ -302,7 +310,11 @@ export function AddPaper({
           ...metaWithTags,
           contexts: Array.from(new Set([...(baseContexts || []), ...batchContexts])),
         }
-        form.append("metadata", JSON.stringify(metaWithContexts))
+        const metaWithReadState = {
+          ...metaWithContexts,
+          aurora_read_state: batchReadState,
+        }
+        form.append("metadata", JSON.stringify(metaWithReadState))
         if (item.file) form.append("file", item.file)
         const url = library ? `/api/papers?library=${encodeURIComponent(library)}` : "/api/papers"
         const r = await fetch(url, { method: "POST", body: form })
@@ -507,6 +519,23 @@ export function AddPaper({
                 )}
               </div>
             )}
+
+            <div className="mb-2">
+              <label className="flex items-center gap-3">
+                <span className="text-sm">Reading status</span>
+                <select
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  value={selectedReadState}
+                  onChange={(e) => setSelectedReadState(e.target.value)}
+                >
+                  {READ_STATE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.emoji} {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
             <div className="mb-2">
               <div className="flex items-center gap-2">
@@ -729,6 +758,21 @@ export function AddPaper({
 
           {batchItems.length > 0 && (
             <div className="border border-zinc-200 dark:border-zinc-700 rounded p-3 bg-white dark:bg-zinc-900">
+              <div className="text-sm font-semibold mb-2">Batch reading status</div>
+              <div className="flex items-center gap-2 mb-3">
+                <select
+                  className="border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                  value={batchReadState}
+                  onChange={(e) => setBatchReadState(e.target.value)}
+                >
+                  {READ_STATE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.emoji} {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-zinc-500">Applies to all selected items</span>
+              </div>
               <div className="text-sm font-semibold mb-2">Batch tags</div>
               <div className="flex items-center gap-2">
                 <input
