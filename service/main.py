@@ -25,6 +25,7 @@ UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
 AURORA_CONFIG_FILE = Path(__file__).parent / ".aurora_config.json"
 VAULT_CONFIG_FILENAME = ".aurora-lib.json"
 AURORA_PAPIS_CONFIG_DIR = Path(__file__).parent / ".papis"
+STRICT_UNIQUE_DOCUMENT_KEYS = ["doi", "eprint", "url", "doc_url"]
 DEFAULT_NOTES_DIR = "paper-notes"
 LEGACY_NOTE_BLOCK_BEGIN = "%% AURORA:BEGIN %%"
 LEGACY_NOTE_BLOCK_END = "%% AURORA:END %%"
@@ -140,6 +141,7 @@ def _bootstrap_from_env() -> None:
             if not config.has_section(general_section):
                 config.add_section(general_section)
             config[general_section]["default-library"] = library_name
+            config[general_section]["unique-document-keys"] = ", ".join(STRICT_UNIQUE_DOCUMENT_KEYS)
 
             config_folder = papis_config.get_config_folder()
             os.makedirs(config_folder, exist_ok=True)
@@ -370,6 +372,7 @@ def setup_aurora(body: dict = Body(...)):
             config.add_section(general_section)
         # Always set default library to the newly created one
         config[general_section]["default-library"] = library_name
+        config[general_section]["unique-document-keys"] = ", ".join(STRICT_UNIQUE_DOCUMENT_KEYS)
 
         config_folder = papis_config.get_config_folder()
         os.makedirs(config_folder, exist_ok=True)
