@@ -141,7 +141,7 @@ def _bootstrap_from_env() -> None:
             if not config.has_section(general_section):
                 config.add_section(general_section)
             config[general_section]["default-library"] = library_name
-            config[general_section]["unique-document-keys"] = ", ".join(STRICT_UNIQUE_DOCUMENT_KEYS)
+            config[general_section]["unique-document-keys"] = repr(STRICT_UNIQUE_DOCUMENT_KEYS)
 
             config_folder = papis_config.get_config_folder()
             os.makedirs(config_folder, exist_ok=True)
@@ -372,7 +372,7 @@ def setup_aurora(body: dict = Body(...)):
             config.add_section(general_section)
         # Always set default library to the newly created one
         config[general_section]["default-library"] = library_name
-        config[general_section]["unique-document-keys"] = ", ".join(STRICT_UNIQUE_DOCUMENT_KEYS)
+        config[general_section]["unique-document-keys"] = repr(STRICT_UNIQUE_DOCUMENT_KEYS)
 
         config_folder = papis_config.get_config_folder()
         os.makedirs(config_folder, exist_ok=True)
