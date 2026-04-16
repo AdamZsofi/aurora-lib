@@ -1014,30 +1014,58 @@ def _build_generated_note_block(doc: dict) -> str:
     return ""
 
 def _note_pdf_link(doc: dict) -> Optional[tuple[str, str]]:
-    files = doc.get("files") if isinstance(doc.get("files"), list) else []
-    pdf_file = None
-    for f in files:
-        if isinstance(f, str) and f.lower().endswith(".pdf") and ("annotated" in f.lower() or "dirty" in f.lower()):
-            pdf_file = f
-            break
-    if not pdf_file:
-        for f in files:
-            if isinstance(f, str) and f.lower().endswith(".pdf"):
-                pdf_file = f
-                break
-    if not pdf_file:
-        return None
-
-    pdf_path = Path(pdf_file)
+    files_raw = doc.get("files")
+    files: list[str] = [str(f) for f in files_raw] if isinstance(files_raw, list) else []
     aurora_cfg = _load_aurora_config()
-    vault_path = Path(aurora_cfg.get("vault_path")) if isinstance(aurora_cfg.get("vault_path"), str) else None
-    library_path = Path(aurora_cfg.get("library_path")) if isinstance(aurora_cfg.get("library_path"), str) else None
+    vault_value = aurora_cfg.get("vault_path")
+    library_value = aurora_cfg.get("library_path")
+    vault_path = Path(vault_value) if isinstance(vault_value, str) else None
+    library_path = Path(library_value) if isinstance(library_value, str) else None
     folder_name = (
         doc.get("folder_name")
         or doc.get("raw", {}).get("folder")
         or doc.get("raw", {}).get("dir")
         or doc.get("id")
     )
+
+    def _materialize_path(value: str) -> Path:
+        candidate = Path(value)
+        if candidate.is_absolute():
+            return candidate
+        if library_path and folder_name:
+            return library_path / str(folder_name) / candidate.name
+        if library_path:
+            return library_path / candidate.name
+        return candidate
+
+    candidates: list[Path] = []
+    for f in files:
+        if isinstance(f, str) and f.lower().endswith(".pdf"):
+            candidates.append(_materialize_path(f))
+
+    # If file list is stale or missing, fall back to scanning the document folder.
+    if library_path and folder_name:
+        folder = library_path / str(folder_name)
+        if folder.exists():
+            for p in sorted(folder.glob("*.pdf")):
+                if p not in candidates:
+                    candidates.append(p)
+
+    if not candidates:
+        return None
+
+    def _score(p: Path) -> tuple[int, int]:
+        name = p.name.lower()
+        preferred = 0
+        if "annotated" in name or "dirty" in name:
+            preferred = 2
+        elif name.endswith(".pdf"):
+            preferred = 1
+        exists = 1 if p.exists() else 0
+        return (preferred, exists)
+
+    candidates.sort(key=_score, reverse=True)
+    pdf_path = candidates[0]
 
     rel_path = None
     if pdf_path.is_absolute() and vault_path:
