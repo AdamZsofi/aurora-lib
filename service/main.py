@@ -1130,10 +1130,18 @@ def _note_pdf_link(doc: dict) -> Optional[tuple[str, str, Optional[Path]]]:
         elif name.endswith(".pdf"):
             preferred = 1
         exists = 1 if p.exists() else 0
-        return (preferred, exists)
+        # Existence outranks the annotated/clean preference: a deleted -annotated.pdf
+        # must not win over a -clean.pdf that is actually there.
+        return (exists, preferred)
 
     candidates.sort(key=_score, reverse=True)
     pdf_path = candidates[0]
+
+    # papis serves documents from a cache that is not invalidated when a document
+    # folder disappears, so `files` can name PDFs that are no longer on disk.
+    # Emitting a link to those leaves dead links in the notes; no link is better.
+    if not pdf_path.exists():
+        return None
 
     rel_path = None
     if pdf_path.is_absolute() and vault_path:
