@@ -1008,12 +1008,80 @@ def _note_header(doc: dict, library: Optional[str]) -> str:
 
 def _build_generated_note_block(doc: dict) -> str:
     pdf_link = _note_pdf_link(doc)
-    if pdf_link:
-        label, rel_path = pdf_link
-        return f"**Link to pdf:** [{label}]({rel_path})"
-    return ""
+    if not pdf_link:
+        return ""
+    label, rel_path, pdf_path = pdf_link
+    line = f"**Link to pdf:** [{label}]({rel_path})"
+    # The relative link only resolves where the library is checked out. The GitHub
+    # one resolves anywhere, which is how PDFs stay reachable from a device that
+    # syncs the vault but not the library (the phone).
+    if pdf_path is not None and pdf_path.is_absolute():
+        remote = _github_pdf_url(pdf_path)
+        if remote:
+            line += f" · [on GitHub]({remote})"
+    return line
 
-def _note_pdf_link(doc: dict) -> Optional[tuple[str, str]]:
+
+_GITHUB_BASE_CACHE: dict[str, Optional[str]] = {}
+
+
+def _github_blob_base(repo_dir: Path) -> Optional[str]:
+    """`https://github.com/<owner>/<repo>/blob/<branch>` for the repo at `repo_dir`.
+
+    Returns None when it is not a git repo, has no origin, or origin is not GitHub.
+    """
+    key = str(repo_dir)
+    if key in _GITHUB_BASE_CACHE:
+        return _GITHUB_BASE_CACHE[key]
+
+    base = None
+    try:
+        def _git(*args: str) -> Optional[str]:
+            out = subprocess.run(
+                ["git", "-C", key, *args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return out.stdout.strip() if out.returncode == 0 else None
+
+        url = _git("remote", "get-url", "origin")
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if url and branch and branch != "HEAD":
+            m = re.match(
+                r"^(?:git@github\.com:|https://github\.com/)(.+?)(?:\.git)?$", url
+            )
+            if m:
+                base = f"https://github.com/{m.group(1)}/blob/{branch}"
+    except Exception:
+        base = None
+
+    _GITHUB_BASE_CACHE[key] = base
+    return base
+
+
+def _github_pdf_url(pdf_path: Path) -> Optional[str]:
+    """Link to `pdf_path` on GitHub, or None if it is not in a GitHub-backed repo."""
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(pdf_path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if top.returncode != 0:
+            return None
+        toplevel = Path(top.stdout.strip())
+        base = _github_blob_base(toplevel)
+        if not base:
+            return None
+        rel = pdf_path.resolve().relative_to(toplevel.resolve()).as_posix()
+    except Exception:
+        return None
+    return f"{base}/{urllib.parse.quote(rel)}"
+
+
+def _note_pdf_link(doc: dict) -> Optional[tuple[str, str, Optional[Path]]]:
     files_raw = doc.get("files")
     files: list[str] = [str(f) for f in files_raw] if isinstance(files_raw, list) else []
     aurora_cfg = _load_aurora_config()
@@ -1088,7 +1156,7 @@ def _note_pdf_link(doc: dict) -> Optional[tuple[str, str]]:
             rel_path = Path(pdf_path.name)
 
     label = pdf_path.name
-    return label, rel_path.as_posix()
+    return label, rel_path.as_posix(), pdf_path
 
 def _build_frontmatter(doc: dict, library: Optional[str]) -> str:
     def j(value):
