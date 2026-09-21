@@ -2072,10 +2072,13 @@ if WEB_UI_DIST.exists():
     def serve_spa(path: str):
         if path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        file_path = WEB_UI_DIST / path
-        if file_path.exists() and file_path.is_file():
+        dist_root = WEB_UI_DIST.resolve()
+        file_path = (dist_root / path).resolve()
+        # Only serve files that stay inside the build dir. This blocks
+        # path traversal (for example "../../etc/passwd").
+        if file_path.is_relative_to(dist_root) and file_path.is_file():
             return FileResponse(file_path)
-        return FileResponse(WEB_UI_DIST / "index.html")
+        return FileResponse(dist_root / "index.html")
 
 
 if __name__ == "__main__":
