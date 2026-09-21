@@ -76,12 +76,17 @@ OpenAlex tags are best-effort and can be edited manually in the UI.
 
 ### Backend
 
+The `papis/` submodule must be present. `requirements.txt` installs it as an editable dependency.
+
 ```
+git submodule update --init
 ./scripts/ensure-venv.sh
 source .venv/bin/activate
 pip install -r service/requirements.txt
-uvicorn service.main:app --reload --port 5173
+uvicorn service.main:app --reload --port 8000
 ```
+
+The backend must run on port 8000 in dev. The Vite dev server proxies `/api` to that port.
 
 ### Frontend (optional in dev)
 
@@ -92,3 +97,11 @@ cd web-ui
 npm install
 npm run dev
 ```
+
+## License
+
+Copyright (C) 2026 Zsófia Ádám.
+
+Aurora Lib is free software. You can redistribute it and modify it under the terms of the GNU General Public License, version 3 or later. See [LICENSE](LICENSE) for the full text.
+
+Aurora Lib depends on [papis](https://github.com/papis/papis) (GPL-3.0), included as a submodule. That dependency is the reason this project uses GPL-3.0.
