@@ -20,7 +20,8 @@ docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 DOCKER_RUN_ARGS=(
   -d
   --name "${CONTAINER_NAME}"
-  -p 8973:8973
+  # Publish on loopback only: Aurora has no login, so the network must not reach it.
+  -p 127.0.0.1:8973:8973
 )
 
 DOCKER_RUN_ARGS+=(
