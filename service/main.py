@@ -15,10 +15,18 @@ import urllib.request
 import webbrowser
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 
 import platformdirs
 
-app = FastAPI()
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _aurora_startup()
+    yield
+
+
+app = FastAPI(lifespan=_lifespan)
 
 WEB_UI_DIST = Path(__file__).resolve().parents[1] / "web-ui" / "dist"
 
@@ -77,7 +85,6 @@ def _enforce_single_library_path(vault_path: Path) -> None:
         raise HTTPException(status_code=400, detail="This instance is locked to a single vault path")
 
 
-@app.on_event("startup")
 def _aurora_startup() -> None:
     if not papis_importable():
         return
