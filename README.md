@@ -30,6 +30,10 @@ Aurora Lib is a local-first web UI for managing a papis library inside an Obsidi
     - Practical mobile notes: [Obsidian Android syncing via GitHub](https://www.reddit.com/r/ObsidianMD/comments/17odzjb/obsidian_android_syncing_via_github_in_2023/).
 - For reading and annotating PDFs inside Obsidian, PDF++ is recommended.
 
+## Requirements
+
+The Linux user service and development need Python 3.14 and Node.js 24. These are the only tested versions. The Docker image brings its own.
+
 ## Install options
 
 ### Linux user service (recommended)

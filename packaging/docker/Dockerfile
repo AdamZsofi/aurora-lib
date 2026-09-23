@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
-FROM node:20-alpine AS ui-build
+FROM node:24-alpine AS ui-build
 WORKDIR /app/web-ui
 COPY web-ui/package.json web-ui/package-lock.json ./
 RUN npm ci
 COPY web-ui ./
 RUN npm run build
 
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

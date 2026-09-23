@@ -24,6 +24,8 @@ cd web-ui && npm install && npm run dev          # UI on http://localhost:5173
 
 Use the VSCode "Full Stack: Debug" compound launch config for both at once. Production (systemd / Docker) instead serves the built UI directly from FastAPI on port 8973.
 
+Supported versions: exactly one of each — Python 3.14 and Node 24 (`.nvmrc`, Dockerfile). Don't add compatibility code for older versions.
+
 ## Things to know
 
 - **Port:** backend = 8000 in dev (Vite proxy + `__main__` + launch.json all assume this).
