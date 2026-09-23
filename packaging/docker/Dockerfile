@@ -26,5 +26,5 @@ COPY service /app/service
 RUN rm -f /app/service/.aurora_config.json /app/service/.ui_state.json
 COPY --from=ui-build /app/web-ui/dist /app/web-ui/dist
 
-EXPOSE 5173
-CMD ["python", "-m", "uvicorn", "service.main:app", "--host", "0.0.0.0", "--port", "5173"]
+EXPOSE 8973
+CMD ["python", "-m", "uvicorn", "service.main:app", "--host", "0.0.0.0", "--port", "8973"]

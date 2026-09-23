@@ -20,7 +20,7 @@ docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 DOCKER_RUN_ARGS=(
   -d
   --name "${CONTAINER_NAME}"
-  -p 5173:5173
+  -p 8973:8973
 )
 
 DOCKER_RUN_ARGS+=(
@@ -32,5 +32,5 @@ DOCKER_RUN_ARGS+=(
 
 docker run "${DOCKER_RUN_ARGS[@]}" "${IMAGE_NAME}"
 
-printf "Aurora Lib started.\nOpen: http://localhost:5173\n"
+printf "Aurora Lib started.\nOpen: http://localhost:8973\n"
 printf "Mounted vault path at /data inside the container.\n"

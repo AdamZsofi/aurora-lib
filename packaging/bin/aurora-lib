@@ -10,7 +10,7 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 
 HOST="${AURORA_HOST:-127.0.0.1}"
-PORT="${AURORA_PORT:-5173}"
+PORT="${AURORA_PORT:-8973}"
 LOG_LEVEL="${AURORA_LOG_LEVEL:-info}"
 
 exec "${PYTHON_BIN}" -m uvicorn service.main:app --host "${HOST}" --port "${PORT}" --log-level "${LOG_LEVEL}"

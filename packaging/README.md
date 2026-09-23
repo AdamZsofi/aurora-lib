@@ -11,7 +11,7 @@ It builds the web UI and serves it directly from FastAPI.
 
 2. Open:
 
-   http://localhost:5173/
+   http://localhost:8973/
 
 ## Uninstall
 
@@ -39,7 +39,7 @@ You can change host/port/log level:
 
 ## Docker (single image)
 
-Build and run a single container that serves the UI on localhost:5173.
+Build and run a single container that serves the UI on localhost:8973.
 
 Start (requires a vault path on the host):
 
