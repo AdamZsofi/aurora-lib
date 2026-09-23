@@ -7,12 +7,12 @@ RUN npm ci
 COPY web-ui ./
 RUN npm run build
 
-FROM python:3.14-slim AS runtime
+# Python, papis and the backend dependencies, shared by the test and runtime images.
+FROM python:3.14-slim AS deps
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    AURORA_DOCKER=1
+    PIP_NO_CACHE_DIR=1
 
 COPY service/requirements.txt /app/service/requirements.txt
 COPY papis /app/papis
@@ -22,8 +22,16 @@ RUN pip install --upgrade pip \
 
 WORKDIR /app
 
+# Test image. scripts/test.sh mounts the repo read-only at /app and runs pytest.
+FROM deps AS test
+COPY requirements-dev.txt /tmp/requirements-dev.txt
+RUN pip install -r /tmp/requirements-dev.txt
+
+# Runtime image. It is the default target, so it must stay the last stage.
+FROM deps AS runtime
+ENV AURORA_DOCKER=1
+
 COPY service /app/service
-RUN rm -f /app/service/.aurora_config.json /app/service/.ui_state.json
 COPY --from=ui-build /app/web-ui/dist /app/web-ui/dist
 
 EXPOSE 8973

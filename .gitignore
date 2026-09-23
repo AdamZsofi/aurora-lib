@@ -11,3 +11,4 @@ service/.papis/
 __pycache__/
 *.pyc
 context-info/*
+.pytest_cache/

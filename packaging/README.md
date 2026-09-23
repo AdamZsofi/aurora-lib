@@ -29,6 +29,13 @@ You can change host/port/log level:
 - AURORA_PORT
 - AURORA_LOG_LEVEL
 
+## Where Aurora keeps its files
+
+- `~/.config/aurora-lib/config.json` — the active vault and library.
+- `~/.local/state/aurora-lib/` — UI state and the papis config that Aurora generates.
+
+The vault itself holds only its portable settings, in `.aurora-lib.json`.
+
 ## Notes about user services
 
 - The service runs as your user inside your login session. This allows GUI actions like opening PDFs.

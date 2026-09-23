@@ -102,6 +102,21 @@ npm install
 npm run dev
 ```
 
+### Tests
+
+Run the tests in a container with podman or docker. The container mounts the repo read-only and has no network access:
+
+```
+scripts/test.sh
+```
+
+To run them directly, for example to debug one test:
+
+```
+pip install -r requirements-dev.txt
+python -m pytest -k <test name>
+```
+
 ## License
 
 Copyright (C) 2026 Zsófia Ádám.

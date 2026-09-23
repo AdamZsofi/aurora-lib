@@ -16,15 +16,21 @@ import webbrowser
 import subprocess
 import sys
 
+import platformdirs
+
 app = FastAPI()
 
 WEB_UI_DIST = Path(__file__).resolve().parents[1] / "web-ui" / "dist"
 
 SAMPLE_FILE = Path(__file__).parent / "sample_papers.json"
-UI_STATE_FILE = Path(__file__).parent / ".ui_state.json"
-AURORA_CONFIG_FILE = Path(__file__).parent / ".aurora_config.json"
+# Machine-specific config and state live in the user's folders (on Linux
+# ~/.config/aurora-lib and ~/.local/state/aurora-lib), not in the source tree.
+AURORA_CONFIG_DIR = Path(platformdirs.user_config_dir("aurora-lib", appauthor=False))
+AURORA_STATE_DIR = Path(platformdirs.user_state_dir("aurora-lib", appauthor=False))
+UI_STATE_FILE = AURORA_STATE_DIR / "ui-state.json"
+AURORA_CONFIG_FILE = AURORA_CONFIG_DIR / "config.json"
 VAULT_CONFIG_FILENAME = ".aurora-lib.json"
-AURORA_PAPIS_CONFIG_DIR = Path(__file__).parent / ".papis"
+AURORA_PAPIS_CONFIG_DIR = AURORA_STATE_DIR / "papis"
 STRICT_UNIQUE_DOCUMENT_KEYS = ["doi", "eprint", "url", "doc_url"]
 DEFAULT_NOTES_DIR = "paper-notes"
 LEGACY_NOTE_BLOCK_BEGIN = "%% AURORA:BEGIN %%"
@@ -442,6 +448,7 @@ def set_ui_state(body: dict = Body(...)):
         "activeTab": body.get("activeTab") if isinstance(body.get("activeTab"), str) else "__papers__",
     }
     try:
+        UI_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         UI_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to persist UI state: {e}")
@@ -959,6 +966,7 @@ def _load_aurora_config() -> dict:
         return {}
 
 def _save_aurora_config(data: dict) -> None:
+    AURORA_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     AURORA_CONFIG_FILE.write_text(json.dumps(data, indent=2))
 
 
