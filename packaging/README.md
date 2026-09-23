@@ -3,6 +3,8 @@
 This packaging bundle installs Aurora Lib as a user-level systemd service (no Docker).
 It builds the web UI and serves it directly from FastAPI.
 
+The service runs from this repo checkout. Keep the checkout in place after you install: moving or deleting it stops the service. A standalone release is not available yet.
+
 ## Install
 
 1. Run the installer from the repo root:

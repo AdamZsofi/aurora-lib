@@ -37,6 +37,26 @@ def test_setup_creates_an_empty_library_inside_the_vault(client, vault):
     assert response.json()["papers"] == []
 
 
+def test_setup_on_an_existing_obsidian_vault_keeps_its_files(client, vault):
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian" / "app.json").write_text("{}")
+    note = vault / "daily" / "2026-09-23.md"
+    note.parent.mkdir()
+    note.write_text("# My note\n")
+
+    setup_library(client, vault)
+
+    assert note.read_text() == "# My note\n"
+    assert (vault / ".obsidian" / "app.json").read_text() == "{}"
+    assert (vault / "papers").is_dir()
+    assert (vault / "paper-notes").is_dir()
+
+
+def test_import_needs_a_vault_that_aurora_set_up(client, vault):
+    response = client.post("/api/setup", json={"path": str(vault), "mode": "import"})
+    assert response.status_code == 404
+
+
 def test_setup_keeps_machine_config_out_of_the_vault(client, vault):
     setup_library(client, vault)
 

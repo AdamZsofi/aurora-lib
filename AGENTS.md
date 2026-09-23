@@ -47,6 +47,7 @@ scripts/test.sh                                  # default: all tests in a conta
 - **papis is used in-process**, not via CLI: `from papis.database import get_database`, `papis.commands.add`, `papis.api.save_doc`, etc. Aurora forces its own papis config dir via `PAPIS_CONFIG_DIR` → `~/.local/state/aurora-lib/papis/`.
 - **Config and state live outside the repo** (resolved with `platformdirs`): `~/.config/aurora-lib/config.json` holds the active vault and library, and `~/.local/state/aurora-lib/` holds `ui-state.json` and `papis/config`. The vault holds only portable settings, in `.aurora-lib.json`. The installed service still runs its code from the repo checkout.
 - **Data model:** papers are papis docs (`info.yaml` + files) inside the vault's library dir. Aurora adds custom keys: `aurora_read_state`, `tags`, `contexts`, `user_notes`. Obsidian notes are Markdown with a generated YAML frontmatter + PDF link header that Aurora upserts (`_upsert_note_header`), preserving everything under `## Notes`.
+- **Setup modes:** "Create" works on any folder, including an existing Obsidian vault. It adds the library folder, `paper-notes/` and `.aurora-lib.json`, and leaves other files alone. "Import" reconnects a vault that already has `.aurora-lib.json`, for example on a second machine.
 - **Modes:** env vars `AURORA_SINGLE_LIBRARY`, `AURORA_DOCKER`, `AURORA_DEFAULT_VAULT` lock the instance to one vault (used by Docker). Docker disables server-side "Open PDF".
 - Error handling leans heavily on `except Exception` swallowing — when debugging backend behavior, add logging rather than trusting that failures surface.
 
@@ -59,4 +60,3 @@ Open work, roughly in order:
 - Config move, stage B: store only the vault path in `config.json`, derive the rest from the vault's `.aurora-lib.json` at startup, regenerate the papis config on each start, and merge the duplicated setup logic in `setup_aurora` and `_bootstrap_from_env`. After that, `uninstall.sh` can delete the state folder.
 - More tests: note handling, DOI and author parsing, an API lifecycle test, security regressions. Then CI, then a frontend type-check and Vitest.
 - An install that works without the repo checkout, for example a Python package with the built UI inside.
-- FastAPI's `on_event` is deprecated. Move the startup hook to a lifespan handler.

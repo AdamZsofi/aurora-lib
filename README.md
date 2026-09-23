@@ -38,6 +38,8 @@ The Linux user service and development need Python 3.14 and Node.js 24. These ar
 
 ### Linux user service (recommended)
 
+The service runs from this repo checkout, so keep the checkout in place after you install. A standalone release is not available yet.
+
 See [packaging/README.md](packaging/README.md) and run:
 
 ```
