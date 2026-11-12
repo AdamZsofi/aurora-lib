@@ -1,3 +1,3 @@
 [submodule "papis"]
 	path = papis
-	url = git@github.com:papis/papis.git
+	url = https://github.com/papis/papis.git

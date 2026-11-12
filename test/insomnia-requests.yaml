@@ -1,6 +1,6 @@
 type: collection.insomnia.rest/5.0
 schema_version: "5.1"
-name: ref-project
+name: aurora-lib
 meta:
   id: wrk_153da9b92faf457a981eb0b9ebfb7a47
   created: 1768129607533
@@ -99,7 +99,7 @@ collection:
           value: ""
           description: ""
           disabled: false
-          fileName: ~/Repositories/ref-project/context-info/example-papers/2022-ICSE.Decomposing_Software_Verification_into_Off-the-Shelf-Components.pdf
+          fileName: ""
           type: file
     headers:
       - name: Content-Type
