@@ -46,6 +46,20 @@ Adding a paper by DOI, with an optional PDF:
     - Practical mobile notes: [Obsidian Android syncing via GitHub](https://www.reddit.com/r/ObsidianMD/comments/17odzjb/obsidian_android_syncing_via_github_in_2023/).
 - For reading and annotating PDFs inside Obsidian, PDF++ is recommended.
 
+### Keeping the vault in git
+
+Aurora Lib keeps everything as plain files in the vault, so you can version and sync the vault with git, for example with the Obsidian Git plugin.
+
+The library folder (`paper-lib/` by default) holds the PDFs, so it can get large and make the vault repo slow to work with. If that is a problem for you, keep the papers in a separate repo and add it to the vault as a submodule:
+
+```
+git submodule add <papers repo URL> paper-lib
+```
+
+If the library folder already exists, move its content to the papers repo first, because `git submodule add` needs a free path.
+
+With a submodule, Aurora Lib writes papers to the papers repo and notes to the vault repo, so you commit in both. One repo is simpler. Which option fits better depends on your use case.
+
 ## Requirements
 
 The Linux user service and development need Python 3.14 and Node.js 24. These are the only tested versions. The Docker image brings its own.
