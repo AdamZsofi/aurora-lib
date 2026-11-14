@@ -16,12 +16,19 @@ if [[ ! -x "${ROOT_DIR}/packaging/bin/aurora-lib" ]]; then
   chmod +x "${ROOT_DIR}/packaging/bin/aurora-lib"
 fi
 
+if [[ ! -f "${ROOT_DIR}/papis/pyproject.toml" ]]; then
+  git -C "${ROOT_DIR}" submodule update --init papis
+fi
+
 if [[ ! -d "${ROOT_DIR}/.venv" ]]; then
   python3 -m venv "${ROOT_DIR}/.venv"
 fi
 
 "${ROOT_DIR}/.venv/bin/pip" install --upgrade pip
-"${ROOT_DIR}/.venv/bin/pip" install -r "${ROOT_DIR}/service/requirements.txt"
+# pip resolves "-e ../papis" in requirements.txt against the current directory.
+pushd "${ROOT_DIR}/service" >/dev/null
+"${ROOT_DIR}/.venv/bin/pip" install -r requirements.txt
+popd >/dev/null
 
 pushd "${ROOT_DIR}/web-ui" >/dev/null
 npm install

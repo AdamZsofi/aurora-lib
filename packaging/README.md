@@ -7,7 +7,7 @@ The service runs from this repo checkout. Keep the checkout in place after you i
 
 ## Install
 
-1. Run the installer from the repo root:
+1. Run the installer. It fetches the papis submodule if it is missing:
 
    ./packaging/install.sh
 

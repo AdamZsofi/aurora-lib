@@ -13,6 +13,10 @@ fi
 
 cd "${ROOT_DIR}"
 
+if [[ ! -f papis/pyproject.toml ]]; then
+  git submodule update --init papis
+fi
+
 docker build -f packaging/docker/Dockerfile -t "${IMAGE_NAME}" .
 
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true

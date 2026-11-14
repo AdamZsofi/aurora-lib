@@ -52,6 +52,15 @@ The Linux user service and development need Python 3.14 and Node.js 24. These ar
 
 ## Install options
 
+Both options start from a clone of this repo, together with the papis submodule:
+
+```
+git clone --recursive https://github.com/AdamZsofi/aurora-lib.git
+cd aurora-lib
+```
+
+If you cloned without `--recursive`, the install scripts fetch the submodule for you.
+
 ### Linux user service (recommended)
 
 The service runs from this repo checkout, so keep the checkout in place after you install. A standalone release is not available yet.
@@ -104,7 +113,7 @@ The `papis/` submodule must be present. `requirements.txt` installs it as an edi
 git submodule update --init
 ./scripts/ensure-venv.sh
 source .venv/bin/activate
-pip install -r service/requirements.txt
+(cd service && pip install -r requirements.txt)
 uvicorn service.main:app --reload --port 8000
 ```
 

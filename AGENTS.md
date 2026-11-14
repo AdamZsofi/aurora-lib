@@ -17,7 +17,7 @@ Backend and frontend run separately in dev; Vite proxies `/api` to the backend.
 
 ```bash
 ./scripts/ensure-venv.sh && source .venv/bin/activate
-pip install -r service/requirements.txt        # installs papis via -e ../papis (submodule must be present)
+(cd service && pip install -r requirements.txt)  # -e ../papis resolves against the cwd, so run it from service/
 uvicorn service.main:app --reload --port 8000  # backend MUST be on 8000 (Vite proxies there)
 
 cd web-ui && npm install && npm run dev          # UI on http://localhost:5173
