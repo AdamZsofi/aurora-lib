@@ -1,6 +1,8 @@
-> **Disclaimer:** A significant portion of this codebase is AI-generated and not yet thoroughly tested. Please treat it as evolving software.
+> **Disclaimer:** While I spent quite a bit of time on making and using this project already, much of the codebase was developed with the help of AI agents. It is also a pet project that I made focusing mostly on my own needs. I hope others can benefit from Aurora Lib as well: feel free to use it, fork it, leave issues, but please take the above into account.
 
 Aurora Lib is a local-first web UI for managing a papis library inside an Obsidian vault.
+
+![The library view: a table of papers with year, authors, reading status and actions](docs/screenshots/library.png)
 
 ## Main features
 
@@ -22,6 +24,20 @@ Aurora Lib is a local-first web UI for managing a papis library inside an Obsidi
     - papis metadata is stored as YAML (for example `info.yaml`) alongside document files.
     - Notes are standard Markdown files.
     - Portable, readable, and version-control friendly.
+
+### Screenshots
+
+The paper detail view, with tags, reading status and a PDF preview:
+
+![The paper detail view of one paper, with tags, reading status buttons and an embedded PDF preview](docs/screenshots/paper-detail.png)
+
+The Obsidian note that Aurora Lib generates for the same paper. Aurora Lib keeps the properties and the PDF link up to date, and leaves everything under `## Notes` alone:
+
+![An Obsidian note with paper metadata as properties, a link to the PDF and a Notes section](docs/screenshots/obsidian-note.png)
+
+Adding a paper by DOI, with an optional PDF:
+
+![The "Add paper" dialog in single DOI mode, with fields for the DOI, reading status, tags, contexts and an optional PDF](docs/screenshots/add-paper.png)
 
 ### Obsidian recommendations
 
